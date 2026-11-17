@@ -1,0 +1,212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Pillar 2: Validation Blueprint for UserProfile (/users/{userId})
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid',
+          'displayName',
+          'theme',
+          'uiLanguage',
+          'defaultPaperSize',
+          'defaultFontFamily',
+          'defaultFontSize',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'theme',
+          'uiLanguage',
+          'defaultPaperSize',
+          'defaultFontFamily',
+          'defaultFontSize',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == request.auth.uid &&
+        data.displayName is string && data.displayName.size() <= 120 &&
+        data.theme is string && data.theme.size() <= 16 &&
+        data.theme in ['light', 'dark'] &&
+        data.uiLanguage is string && data.uiLanguage.size() <= 8 &&
+        data.uiLanguage in ['id', 'en'] &&
+        data.defaultPaperSize is string && data.defaultPaperSize.size() <= 16 &&
+        data.defaultPaperSize in ['a4', 'letter'] &&
+        data.defaultFontFamily is string && data.defaultFontFamily.size() <= 32 &&
+        data.defaultFontFamily in ['tgtermes', 'libertinus', 'ebgaramond'] &&
+        data.defaultFontSize is string && data.defaultFontSize.size() <= 16 &&
+        data.defaultFontSize in ['10pt', '10.5pt', '11pt', '11.5pt'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Pillar 2: Validation Blueprint for CVDocument (/users/{userId}/cvs/{cvId})
+    function isValidCVDocument(data) {
+      return data.keys().hasAll([
+          'id',
+          'ownerId',
+          'title',
+          'templatePreset',
+          'exportCount',
+          'payload',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'ownerId',
+          'title',
+          'templatePreset',
+          'exportCount',
+          'payload',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId == request.auth.uid &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.templatePreset is string && data.templatePreset.size() <= 40 &&
+        data.templatePreset in [
+          'classic',
+          'compact',
+          'academic',
+          'jakes',
+          'wharton',
+          'mckinsey',
+          'cover_letter_1',
+          'simple_letter'
+        ] &&
+        data.exportCount is number && data.exportCount >= 0 && data.exportCount <= 1000000 &&
+        data.payload is map && data.payload.size() >= 1 && data.payload.size() <= 30 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Collection 1: /users/{userId}
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId) && existing().uid == request.auth.uid;
+
+      allow create: if isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == userId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if (
+        isOwner(userId) &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action: Update Preferences or DisplayName
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName',
+            'theme',
+            'uiLanguage',
+            'defaultPaperSize',
+            'defaultFontFamily',
+            'defaultFontSize',
+            'updatedAt'
+          ])
+        )
+      );
+
+      allow delete: if isOwner(userId) && isValidId(userId) && existing().uid == request.auth.uid;
+
+      // Subcollection 2: /users/{userId}/cvs/{cvId}
+      match /cvs/{cvId} {
+        // Pillar 1: Master Gate Relational Sync
+        function isParentUserValid() {
+          return (
+            exists(/databases/$(database)/documents/users/$(userId)) &&
+            get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          ) || (
+            existsAfter(/databases/$(database)/documents/users/$(userId)) &&
+            getAfter(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          );
+        }
+
+        allow get: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(cvId) &&
+          existing().ownerId == request.auth.uid &&
+          isParentUserValid();
+
+        // Pillar 8: Secure List Queries (No get/exists inside list to avoid O(n) cost explosion)
+        allow list: if isOwner(userId) &&
+          existing().ownerId == request.auth.uid;
+
+        allow create: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(cvId) &&
+          isValidCVDocument(incoming()) &&
+          incoming().id == cvId &&
+          incoming().ownerId == userId &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isParentUserValid();
+
+        allow update: if (
+          isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(cvId) &&
+          isValidCVDocument(incoming()) &&
+          incoming().id == existing().id &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          isParentUserValid() && (
+            // Action: Save CV Content, Title, Preset, or Export Count
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title',
+              'templatePreset',
+              'exportCount',
+              'payload',
+              'updatedAt'
+            ])
+          )
+        );
+
+        allow delete: if isOwner(userId) &&
+          isValidId(userId) &&
+          isValidId(cvId) &&
+          existing().ownerId == request.auth.uid &&
+          isParentUserValid();
+      }
+    }
+  }
+}

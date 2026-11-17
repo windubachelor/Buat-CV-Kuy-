@@ -1,5 +1,10 @@
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from 'pdf-lib';
-import type { CVData, DocumentMode, SectionKey } from '../shared/schema';
+import {
+  type CVData,
+  type DocumentMode,
+  isCoverLetterTemplatePreset,
+  type SectionKey,
+} from '../shared/schema';
 import { createDefaultCoverLetter } from '../shared/templates';
 
 interface StyledSpan {
@@ -263,12 +268,17 @@ export async function compileHarvardVectorPdf(
   const pageWidth = isLetter ? 612.0 : 595.28;
   const pageHeight = isLetter ? 792.0 : 841.89;
 
-  // Match latexBuilder.ts geometry margins: 0.72in (normal), 0.52in (narrow/compact preset), 0.45in (compact)
+  // Match latexBuilder.ts geometry margins: 0.72in (normal), 0.52in (narrow/compact/wharton/mckinsey), 0.45in (compact/jakes)
   let marginIn = 0.72;
-  if (settings.margin === 'narrow' || settings.templatePreset === 'compact') {
-    marginIn = 0.52;
-  } else if (settings.margin === 'compact') {
+  if (settings.margin === 'compact' || settings.templatePreset === 'jakes') {
     marginIn = 0.45;
+  } else if (
+    settings.margin === 'narrow' ||
+    settings.templatePreset === 'compact' ||
+    settings.templatePreset === 'wharton' ||
+    settings.templatePreset === 'mckinsey'
+  ) {
+    marginIn = 0.52;
   }
   const marginPt = Number((marginIn * 72).toFixed(2));
 
@@ -282,7 +292,10 @@ export async function compileHarvardVectorPdf(
           : 11.0;
 
   const isCompact =
-    settings.sectionSpacing === 'compact' || settings.templatePreset === 'compact';
+    settings.sectionSpacing === 'compact' ||
+    settings.templatePreset === 'compact' ||
+    settings.templatePreset === 'jakes' ||
+    settings.templatePreset === 'wharton';
   const isRelaxed = settings.sectionSpacing === 'relaxed';
 
   // Exact LaTeX spacing tokens matching latexBuilder.ts (accounting for baseline ascent ~0.70*size)
@@ -420,12 +433,42 @@ export async function compileHarvardVectorPdf(
     }
 
     if (contacts.length > 0) {
-      // Use true centered middot (\u00B7) with \enspace spacing like LaTeX \enspace$\cdot$\enspace
-      const contactLine = contacts.join('   \u00B7   ');
+      const sep = settings.templatePreset === 'jakes' ? '   |   ' : '   \u00B7   ';
+      const contactLine = contacts.join(sep);
       drawCenteredText(contactLine, baseSize - 0.9, fontRegular, rgb(0.06, 0.06, 0.06));
     }
 
-    cursorY -= 1.0;
+    if (settings.templatePreset === 'wharton') {
+      cursorY -= 2.0;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.65,
+        color: rgb(0, 0, 0),
+      });
+      cursorY -= 2.0;
+    } else if (settings.templatePreset === 'mckinsey') {
+      cursorY -= 2.0;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.95,
+        color: rgb(0, 0, 0),
+      });
+      cursorY -= 2.0;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.35,
+        color: rgb(0, 0, 0),
+      });
+      cursorY -= 2.0;
+    } else {
+      cursorY -= 1.0;
+    }
   };
 
   /**
@@ -675,16 +718,6 @@ export async function compileHarvardVectorPdf(
   };
 
   const renderCoverLetter = () => {
-    drawHeaderBlock();
-    currentPage.drawRectangle({
-      x: marginPt,
-      y: cursorY + 1,
-      width: contentWidth,
-      height: 0.6,
-      color: rgb(0, 0, 0),
-    });
-    cursorY -= 12;
-
     const rawCl = cv.coverLetter;
     const hasContent = Boolean(
       rawCl &&
@@ -693,12 +726,59 @@ export async function compileHarvardVectorPdf(
           rawCl.closingParagraph?.trim())
     );
     const cl = hasContent ? rawCl : createDefaultCoverLetter(cv);
+    const preset = settings.templatePreset;
+    const p = cv.personalInfo;
 
     const dateLine = sanitizeWinAnsi(
-      cl.date?.trim() || (lang === 'id' ? '16 November 2026' : 'November 16, 2026')
+      cl.date?.trim() || (lang === 'id' ? '17 November 2026' : 'November 17, 2026')
     );
-    drawRichParagraph([{ text: dateLine }], { justify: false });
-    cursorY -= 9;
+
+    if (preset === 'cover_letter_1') {
+      // ModernCV Classic Header: Left Name + Headline, Right Address + Phone/Email
+      const rightTop = p.location?.trim() || '';
+      const rightBottom = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(' \u00B7 ');
+      drawTwoColRow(p.fullName || 'Nama Lengkap', rightTop, fontBold, fontRegular, baseSize + 3.5);
+      if (p.headline?.trim() || rightBottom) {
+        drawTwoColRow(p.headline?.trim() || '', rightBottom, fontItalic, fontRegular, baseSize - 0.8);
+      }
+      cursorY -= 2;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.75,
+        color: rgb(0, 0, 0),
+      });
+      cursorY -= 12;
+
+      drawTwoColRow(lang === 'id' ? 'Kepada Yth.' : 'To', dateLine, fontBold, fontRegular);
+    } else if (preset === 'simple_letter') {
+      // Overleaf Standard Letter: Right-aligned sender return address + date
+      drawTwoColRow('', p.fullName || 'Nama Lengkap', fontRegular, fontBold);
+      if (p.location?.trim()) {
+        drawTwoColRow('', p.location.trim(), fontRegular, fontRegular, baseSize - 0.5);
+      }
+      const contactPair = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(' \u00B7 ');
+      if (contactPair) {
+        drawTwoColRow('', contactPair, fontRegular, fontRegular, baseSize - 0.5);
+      }
+      cursorY -= 6;
+      drawTwoColRow('', dateLine, fontRegular, fontRegular);
+      cursorY -= 10;
+    } else {
+      // Standard Harvard OCS Cover Letter Header
+      drawHeaderBlock();
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY + 1,
+        width: contentWidth,
+        height: 0.6,
+        color: rgb(0, 0, 0),
+      });
+      cursorY -= 12;
+      drawRichParagraph([{ text: dateLine }], { justify: false });
+      cursorY -= 9;
+    }
 
     if (cl.recipientName?.trim()) {
       drawRichParagraph([{ text: sanitizeWinAnsi(cl.recipientName.trim()), bold: true }], {
@@ -721,9 +801,10 @@ export async function compileHarvardVectorPdf(
     cursorY -= 9;
 
     if (cl.subjectLine?.trim()) {
-      const prefix = lang === 'id' ? 'Perihal: ' : 'Re: ';
+      const prefix = lang === 'id' ? 'Perihal: ' : 'Sub: ';
       const text =
         cl.subjectLine.trim().toLowerCase().startsWith('perihal') ||
+        cl.subjectLine.trim().toLowerCase().startsWith('sub:') ||
         cl.subjectLine.trim().toLowerCase().startsWith('re:')
           ? cl.subjectLine.trim()
           : `${prefix}${cl.subjectLine.trim()}`;
@@ -733,7 +814,7 @@ export async function compileHarvardVectorPdf(
 
     const salutation =
       cl.salutation?.trim() ||
-      (lang === 'id' ? 'Yth. Bapak/Ibu Tim Rekrutmen,' : 'Dear Hiring Manager,');
+      (lang === 'id' ? 'Dengan hormat,' : 'Dear Hiring Manager,');
     drawRichParagraph([{ text: sanitizeWinAnsi(salutation) }], { justify: false });
     cursorY -= 8;
 
@@ -742,28 +823,74 @@ export async function compileHarvardVectorPdf(
       ...(cl.bodyParagraphs || []),
       cl.closingParagraph,
     ]
-      .map((p) => p?.trim())
-      .filter((p): p is string => Boolean(p));
+      .map((pItem) => pItem?.trim())
+      .filter((pItem): pItem is string => Boolean(pItem));
 
     for (const para of paragraphs) {
-      const subParas = para
-        .split(/\n{2,}/)
-        .map((s) => s.trim())
+      const lines = para
+        .split('\n')
+        .map((l) => l.trim())
         .filter(Boolean);
-      for (const sp of subParas) {
-        drawRichParagraph(parseRichTextSpans(sp), { lineGapMultiplier: 1.26, justify: true });
-        cursorY -= 8;
+      const bulletLines = lines.filter((l) => /^[•\-*]\s+/.test(l));
+      if (bulletLines.length > 0) {
+        const introLines = lines.filter((l) => !/^[•\-*]\s+/.test(l));
+        if (introLines.length > 0) {
+          drawRichParagraph(parseRichTextSpans(introLines.join(' ')), {
+            lineGapMultiplier: 1.24,
+            justify: true,
+          });
+          cursorY -= 3;
+        }
+        drawBullets(bulletLines.map((b) => b.replace(/^[•\-*]\s+/, '')));
+        cursorY -= 6;
+      } else {
+        const subParas = para
+          .split(/\n{2,}/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        for (const sp of subParas) {
+          drawRichParagraph(parseRichTextSpans(sp), { lineGapMultiplier: 1.24, justify: true });
+          cursorY -= 8;
+        }
       }
     }
 
-    cursorY -= 6;
+    cursorY -= 4;
     const signOff = cl.signOff?.trim() || (lang === 'id' ? 'Hormat saya,' : 'Sincerely,');
     drawRichParagraph([{ text: sanitizeWinAnsi(signOff) }], { justify: false });
-    cursorY -= 20;
+    cursorY -= 18;
     drawRichParagraph(
       [{ text: sanitizeWinAnsi(cv.personalInfo.fullName || 'Candidate'), bold: true }],
       { justify: false }
     );
+
+    const enclosures = (cl.enclosures || []).map((e) => e.trim()).filter(Boolean);
+    if (enclosures.length > 0) {
+      cursorY -= 10;
+      const encTitle =
+        lang === 'id'
+          ? 'Lampiran (Berkas / Sertifikat Terlampir):'
+          : 'Enclosed (Marksheets / Certificates):';
+      drawRichParagraph([{ text: encTitle, bold: true }], {
+        size: baseSize - 0.5,
+        justify: false,
+      });
+      cursorY -= 2;
+      for (const item of enclosures) {
+        drawRichParagraph([{ text: sanitizeWinAnsi(item) }], {
+          size: baseSize - 0.9,
+          justify: false,
+        });
+      }
+    }
+
+    if (cl.postscript?.trim()) {
+      cursorY -= 10;
+      drawRichParagraph([{ text: sanitizeWinAnsi(cl.postscript.trim()), italic: true }], {
+        size: baseSize - 0.4,
+        justify: true,
+      });
+    }
   };
 
   const renderCVBody = () => {
@@ -1046,9 +1173,14 @@ export async function compileHarvardVectorPdf(
     }
   };
 
-  if (mode === 'cover-letter') {
+  const effectiveMode: DocumentMode =
+    isCoverLetterTemplatePreset(settings.templatePreset) && mode === 'cv'
+      ? 'cover-letter'
+      : mode;
+
+  if (effectiveMode === 'cover-letter') {
     renderCoverLetter();
-  } else if (mode === 'combined') {
+  } else if (effectiveMode === 'combined') {
     renderCoverLetter();
     currentPage = pdfDoc.addPage([pageWidth, pageHeight]);
     cursorY = pageHeight - marginPt;

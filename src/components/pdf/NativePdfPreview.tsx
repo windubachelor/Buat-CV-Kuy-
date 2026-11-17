@@ -14,7 +14,11 @@ import {
 } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { CVData, DocumentMode } from '../../shared/schema';
+import {
+  type CVData,
+  type DocumentMode,
+  isCoverLetterTemplatePreset,
+} from '../../shared/schema';
 import type { ActiveEditorSection } from '../editor/SectionForms';
 import { Badge, Button, Tooltip, cn } from '../ui/primitives';
 
@@ -93,6 +97,7 @@ export const NativePdfPreview: React.FC<NativePdfPreviewProps> = ({
   const texPreRef = useRef<HTMLPreElement | null>(null);
 
   const isId = cv.settings.cvLanguage === 'id';
+  const isDedicatedCoverLetter = isCoverLetterTemplatePreset(cv.settings.templatePreset);
 
   useEffect(() => {
     if (!pdfBase64) return;
@@ -267,48 +272,56 @@ export const NativePdfPreview: React.FC<NativePdfPreviewProps> = ({
       {/* Top Preview Header Bar */}
       <div className="px-3.5 py-2.5 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2 bg-[var(--surface)]/90 backdrop-blur-md z-10">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Document Mode Switcher: CV | Cover Letter | Gabungan */}
-          <div className="flex items-center p-1 rounded-[12px] bg-[var(--muted)] border border-[var(--border)]">
-            <button
-              type="button"
-              onClick={() => onChangeDocumentMode('cv')}
-              className={cn(
-                'px-2.5 py-1 rounded-[8px] text-xs font-semibold transition-all cursor-pointer whitespace-nowrap',
-                documentMode === 'cv'
-                  ? 'bg-[var(--surface)] text-[var(--foreground)] shadow-2xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-              )}
-            >
-              Resume CV
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onChangeDocumentMode('cover-letter');
-                onSelectSection('coverLetter');
-              }}
-              className={cn(
-                'px-2.5 py-1 rounded-[8px] text-xs font-semibold transition-all cursor-pointer whitespace-nowrap',
-                documentMode === 'cover-letter'
-                  ? 'bg-[var(--surface)] text-[var(--foreground)] shadow-2xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-              )}
-            >
-              Cover Letter
-            </button>
-            <button
-              type="button"
-              onClick={() => onChangeDocumentMode('combined')}
-              className={cn(
-                'px-2.5 py-1 rounded-[8px] text-xs font-semibold transition-all cursor-pointer whitespace-nowrap',
-                documentMode === 'combined'
-                  ? 'bg-[var(--surface)] text-[var(--foreground)] shadow-2xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-              )}
-            >
-              Paket 2-Hal
-            </button>
-          </div>
+          {/* Document Mode Switcher: hidden when a dedicated Cover Letter template is selected */}
+          {isDedicatedCoverLetter ? (
+            <div className="px-3 py-1 rounded-[10px] bg-[#B8A9F5]/25 border border-[#B8A9F5]/50 text-xs font-bold text-[#2A2150] dark:text-[#DFD7FC] whitespace-nowrap">
+              {cv.settings.templatePreset === 'cover_letter_1'
+                ? 'Cover Letter #1 (ModernCV ID)'
+                : 'Simple Letter (Overleaf)'}
+            </div>
+          ) : (
+            <div className="flex items-center p-1 rounded-[12px] bg-[var(--muted)] border border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => onChangeDocumentMode('cv')}
+                className={cn(
+                  'px-2.5 py-1 rounded-[8px] text-xs font-semibold transition-all cursor-pointer whitespace-nowrap',
+                  documentMode === 'cv'
+                    ? 'bg-[var(--surface)] text-[var(--foreground)] shadow-2xs'
+                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                )}
+              >
+                Resume CV
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onChangeDocumentMode('cover-letter');
+                  onSelectSection('coverLetter');
+                }}
+                className={cn(
+                  'px-2.5 py-1 rounded-[8px] text-xs font-semibold transition-all cursor-pointer whitespace-nowrap',
+                  documentMode === 'cover-letter'
+                    ? 'bg-[var(--surface)] text-[var(--foreground)] shadow-2xs'
+                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                )}
+              >
+                Cover Letter
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeDocumentMode('combined')}
+                className={cn(
+                  'px-2.5 py-1 rounded-[8px] text-xs font-semibold transition-all cursor-pointer whitespace-nowrap',
+                  documentMode === 'combined'
+                    ? 'bg-[var(--surface)] text-[var(--foreground)] shadow-2xs'
+                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                )}
+              >
+                Paket 2-Hal
+              </button>
+            </div>
+          )}
 
           {/* Segmented View Toggle: Native PDF vs .tex Source */}
           <div className="flex items-center p-1 rounded-[12px] bg-[var(--muted)] border border-[var(--border)]">

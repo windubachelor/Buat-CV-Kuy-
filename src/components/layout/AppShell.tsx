@@ -2,11 +2,14 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Cloud,
   Command as CommandIcon,
   FilePlus2,
   FileText,
   Globe,
   LayoutDashboard,
+  LogIn,
+  LogOut,
   Moon,
   Plus,
   Search,
@@ -19,6 +22,7 @@ import { motion } from 'motion/react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useCVStore } from '../../store/useCVStore';
 import { CreateCVModal } from '../dashboard/CreateCVModal';
 import {
@@ -45,7 +49,7 @@ export function AppShell({
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const { prefs, updatePrefs, getActiveCv } = useCVStore();
+  const { prefs, updatePrefs, getActiveCv, currentUser, signOutUser } = useCVStore();
   const [collapsed, setCollapsed] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -384,6 +388,18 @@ export function AppShell({
                 </button>
               </Tooltip>
 
+              {!currentUser && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate('/auth')}
+                  className="hidden md:inline-flex"
+                >
+                  <Cloud className="w-3.5 h-3.5 text-[#9B86EC]" strokeWidth={2.5} />
+                  <span>Masuk Cloud</span>
+                </Button>
+              )}
+
               {/* User Avatar Menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -393,25 +409,41 @@ export function AppShell({
                     className="h-9 pl-1.5 pr-2.5 rounded-[12px] border border-[var(--border-strong)] bg-[var(--surface)] hover:bg-[var(--muted)] flex items-center gap-2 transition-colors cursor-pointer"
                   >
                     <div className="w-6 h-6 rounded-[8px] bg-[#B8A9F5] text-[#2A2150] flex items-center justify-center text-xs font-bold font-heading">
-                      {(activeCv?.personalInfo.fullName?.[0] || 'U').toUpperCase()}
+                      {(
+                        currentUser?.displayName?.[0] ||
+                        currentUser?.email?.[0] ||
+                        activeCv?.personalInfo.fullName?.[0] ||
+                        'U'
+                      ).toUpperCase()}
                     </div>
-                    <span className="hidden lg:inline text-xs font-semibold max-w-[110px] truncate">
-                      {activeCv?.personalInfo.fullName?.split(' ')[0] || 'Kandidat'}
+                    <span className="hidden lg:inline text-xs font-semibold max-w-[120px] truncate">
+                      {currentUser?.displayName?.split(' ')[0] ||
+                        currentUser?.email?.split('@')[0] ||
+                        activeCv?.personalInfo.fullName?.split(' ')[0] ||
+                        'Kandidat'}
                     </span>
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <div className="px-3 py-2 border-b border-[var(--border)] mb-1">
                     <p className="text-xs font-bold font-heading truncate">
-                      {activeCv?.personalInfo.fullName || 'Pengguna Buat CV Kuy'}
+                      {currentUser?.displayName ||
+                        activeCv?.personalInfo.fullName ||
+                        'Pengguna Buat CV Kuy'}
                     </p>
                     <p className="text-[11px] text-[var(--muted-foreground)] truncate">
-                      {activeCv?.personalInfo.email || 'Penyimpanan Lokal Aktif'}
+                      {currentUser?.email || 'Mode Tamu (Klik Masuk untuk Cloud Sync)'}
                     </p>
+                    {currentUser && (
+                      <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                        <Cloud className="w-3 h-3" strokeWidth={2.5} />
+                        <span>Firebase Firestore Aktif</span>
+                      </span>
+                    )}
                   </div>
                   <DropdownMenuItem onSelect={handleOpenCreate}>
                     <FilePlus2 className="w-3.5 h-3.5 text-[#9B86EC]" strokeWidth={2.5} />
-                    <span>Buat CV Baru...</span>
+                    <span>Buat Dokumen Baru...</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => navigate('/dashboard')}>
                     <LayoutDashboard className="w-3.5 h-3.5" strokeWidth={2.5} />
@@ -419,13 +451,30 @@ export function AppShell({
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => navigate('/templates')}>
                     <BookOpen className="w-3.5 h-3.5" strokeWidth={2.5} />
-                    <span>Template Harvard</span>
+                    <span>Galeri 8 Template LaTeX</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => navigate('/settings')}>
                     <User className="w-3.5 h-3.5" strokeWidth={2.5} />
-                    <span>Pengaturan & Data Lokal</span>
+                    <span>Pengaturan &amp; Data</span>
                   </DropdownMenuItem>
+                  {currentUser ? (
+                    <DropdownMenuItem
+                      onSelect={async () => {
+                        await signOutUser();
+                        toast.info('Anda telah keluar dari akun Firebase.');
+                        navigate('/');
+                      }}
+                    >
+                      <LogOut className="w-3.5 h-3.5 text-red-600" strokeWidth={2.5} />
+                      <span className="text-red-600 dark:text-red-400">Keluar (Logout)</span>
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onSelect={() => navigate('/auth')}>
+                      <LogIn className="w-3.5 h-3.5 text-[#9B86EC]" strokeWidth={2.5} />
+                      <span>Masuk / Daftar Cloud Firebase</span>
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>

@@ -17,7 +17,13 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Eye, EyeOff, GripVertical, SlidersHorizontal } from 'lucide-react';
 import React from 'react';
-import type { CVData, SectionConfigItem, SectionKey } from '../../shared/schema';
+import {
+  type CVData,
+  isCoverLetterTemplatePreset,
+  type SectionConfigItem,
+  type SectionKey,
+  type TemplatePreset,
+} from '../../shared/schema';
 import { Input, Label, Switch, cn } from '../ui/primitives';
 
 const SECTION_DEFAULT_NAMES: Record<SectionKey, string> = {
@@ -157,32 +163,83 @@ export const HarvardSettingsPanel: React.FC<{
       {/* Typography & Geometry Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-5 rounded-2xl bg-white dark:bg-[#1B1828] border border-[#E8E4F8] dark:border-[#2E2944]">
         <div>
-          <Label>Preset Gaya Harvard OCS</Label>
+          <Label>Preset Gaya Harvard OCS & Overleaf LaTeX</Label>
           <select
             value={settings.templatePreset}
             onChange={(e) =>
               updateCV((d) => {
-                const preset = e.target.value as 'classic' | 'compact' | 'academic';
+                const preset = e.target.value as TemplatePreset;
                 d.settings.templatePreset = preset;
                 if (preset === 'compact') {
+                  d.settings.fontFamily = 'libertinus';
                   d.settings.margin = 'narrow';
                   d.settings.sectionSpacing = 'compact';
                   d.settings.fontSize = '10.5pt';
+                  d.settings.showLinksIcon = false;
                 } else if (preset === 'academic') {
                   d.settings.fontFamily = 'ebgaramond';
                   d.settings.margin = 'normal';
+                  d.settings.sectionSpacing = 'normal';
+                  d.settings.fontSize = '11pt';
+                  d.settings.showLinksIcon = false;
+                } else if (preset === 'jakes') {
+                  d.settings.fontFamily = 'tgtermes';
+                  d.settings.margin = 'compact';
+                  d.settings.sectionSpacing = 'compact';
+                  d.settings.fontSize = '10pt';
+                  d.settings.showLinksIcon = true;
+                } else if (preset === 'wharton') {
+                  d.settings.fontFamily = 'tgtermes';
+                  d.settings.margin = 'narrow';
+                  d.settings.sectionSpacing = 'compact';
+                  d.settings.fontSize = '10pt';
+                  d.settings.dateFormat = 'short';
+                  d.settings.showLinksIcon = false;
+                } else if (preset === 'mckinsey') {
+                  d.settings.fontFamily = 'libertinus';
+                  d.settings.margin = 'narrow';
+                  d.settings.sectionSpacing = 'normal';
+                  d.settings.fontSize = '10.5pt';
+                  d.settings.showLinksIcon = false;
+                } else if (preset === 'cover_letter_1') {
+                  d.settings.fontFamily = 'libertinus';
+                  d.settings.margin = 'narrow';
+                  d.settings.sectionSpacing = 'compact';
+                  d.settings.fontSize = '10.5pt';
+                  d.settings.cvLanguage = 'id';
+                  d.settings.showLinksIcon = false;
+                } else if (preset === 'simple_letter') {
+                  d.settings.fontFamily = 'tgtermes';
+                  d.settings.margin = 'normal';
+                  d.settings.sectionSpacing = 'normal';
+                  d.settings.fontSize = '11pt';
+                  d.settings.showLinksIcon = false;
                 } else {
                   d.settings.fontFamily = 'tgtermes';
                   d.settings.margin = 'normal';
+                  d.settings.sectionSpacing = 'normal';
+                  d.settings.fontSize = '11pt';
+                  d.settings.showLinksIcon = false;
                 }
                 return d;
               })
             }
             className="w-full h-10 rounded-xl border border-[#E8E4F8] dark:border-[#2E2944] bg-white dark:bg-[#151221] px-3 text-sm"
           >
-            <option value="classic">Classic Harvard OCS (Standar Korporat)</option>
-            <option value="compact">Compact 1-Halaman (Padat & Efisien)</option>
-            <option value="academic">Academic / Research CV (Riset & Beasiswa)</option>
+            <optgroup label="Standar Resmi Harvard OCS">
+              <option value="classic">Classic Harvard OCS (Standar Korporat)</option>
+              <option value="compact">Harvard High-Density 1-Page (Padat &amp; Efisien)</option>
+              <option value="academic">Harvard Academic &amp; Research CV (Riset &amp; Beasiswa)</option>
+            </optgroup>
+            <optgroup label="Adaptasi Template Resume Overleaf (.tex)">
+              <option value="jakes">Jake&apos;s Resume — Overleaf SWE Edition (Tech)</option>
+              <option value="wharton">Wharton &amp; Wall Street M&amp;A Finance (Garis Kop Tunggal)</option>
+              <option value="mckinsey">McKinsey &amp; Executive Double-Rule (Garis Kop Ganda)</option>
+            </optgroup>
+            <optgroup label="Template Khusus Surat Lamaran / Cover Letter (.tex)">
+              <option value="cover_letter_1">Cover Letter #1 — ModernCV Classic + Lampiran (Bahasa Indonesia)</option>
+              <option value="simple_letter">Simple Letter — Overleaf Standard Formal Letter + P.S.</option>
+            </optgroup>
           </select>
         </div>
 
@@ -330,49 +387,51 @@ export const HarvardSettingsPanel: React.FC<{
         </div>
       </div>
 
-      {/* Drag & Drop Section Reordering */}
-      <div className="space-y-3">
-        <div>
-          <h3 className="text-sm font-bold font-heading">
-            Urutan & Visibilitas Section (Drag & Drop)
-          </h3>
-          <p className="text-xs text-[#5B5475] dark:text-[#A69FC2]">
-            Geser ikon pegangan untuk mengubah urutan bagian pada dokumen PDF LaTeX Anda, atau ubah judul section sesuai kebutuhan.
-          </p>
-        </div>
+      {/* Drag & Drop Section Reordering (Only for CV templates) */}
+      {!isCoverLetterTemplatePreset(settings.templatePreset) && (
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-bold font-heading">
+              Urutan &amp; Visibilitas Section (Drag &amp; Drop)
+            </h3>
+            <p className="text-xs text-[#5B5475] dark:text-[#A69FC2]">
+              Geser ikon pegangan untuk mengubah urutan bagian pada dokumen PDF LaTeX Anda, atau ubah judul section sesuai kebutuhan.
+            </p>
+          </div>
 
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={sectionOrder.map((s) => s.key)}
-            strategy={verticalListSortingStrategy}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
           >
-            <div className="space-y-2">
-              {sectionOrder.map((item, idx) => (
-                <SortableSectionRow
-                  key={item.key}
-                  item={item}
-                  onToggleVisible={() =>
-                    updateCV((d) => {
-                      d.sectionOrder[idx]!.visible = !d.sectionOrder[idx]!.visible;
-                      return d;
-                    })
-                  }
-                  onCustomTitleChange={(val) =>
-                    updateCV((d) => {
-                      d.sectionOrder[idx]!.customTitle = val;
-                      return d;
-                    })
-                  }
-                />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
-      </div>
+            <SortableContext
+              items={sectionOrder.map((s) => s.key)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-2">
+                {sectionOrder.map((item, idx) => (
+                  <SortableSectionRow
+                    key={item.key}
+                    item={item}
+                    onToggleVisible={() =>
+                      updateCV((d) => {
+                        d.sectionOrder[idx]!.visible = !d.sectionOrder[idx]!.visible;
+                        return d;
+                      })
+                    }
+                    onCustomTitleChange={(val) =>
+                      updateCV((d) => {
+                        d.sectionOrder[idx]!.customTitle = val;
+                        return d;
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        </div>
+      )}
     </div>
   );
 };

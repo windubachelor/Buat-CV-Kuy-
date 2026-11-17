@@ -1,0 +1,159 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User workspace preferences and account metadata for Buat CV Kuy.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the user.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "theme": {
+          "type": "string",
+          "description": "Preferred UI color theme.",
+          "enum": ["light", "dark"],
+          "maxLength": 16
+        },
+        "uiLanguage": {
+          "type": "string",
+          "description": "Preferred UI language.",
+          "enum": ["id", "en"],
+          "maxLength": 8
+        },
+        "defaultPaperSize": {
+          "type": "string",
+          "description": "Default paper size for new CVs.",
+          "enum": ["a4", "letter"],
+          "maxLength": 16
+        },
+        "defaultFontFamily": {
+          "type": "string",
+          "description": "Default LaTeX serif font family.",
+          "enum": ["tgtermes", "libertinus", "ebgaramond"],
+          "maxLength": 32
+        },
+        "defaultFontSize": {
+          "type": "string",
+          "description": "Default base font size.",
+          "enum": ["10pt", "10.5pt", "11pt", "11.5pt"],
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was last updated."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "theme",
+        "uiLanguage",
+        "defaultPaperSize",
+        "defaultFontFamily",
+        "defaultFontSize",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CVDocument": {
+      "title": "CVDocument",
+      "description": "Structured Harvard OCS & Overleaf LaTeX CV or Cover Letter document owned by a user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique document identifier matching cvId.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the document owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable document title.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "templatePreset": {
+          "type": "string",
+          "description": "Active LaTeX template preset identifier.",
+          "enum": [
+            "classic",
+            "compact",
+            "academic",
+            "jakes",
+            "wharton",
+            "mckinsey",
+            "cover_letter_1",
+            "simple_letter"
+          ],
+          "maxLength": 40
+        },
+        "exportCount": {
+          "type": "number",
+          "description": "Number of times this document has been exported to PDF."
+        },
+        "payload": {
+          "type": "object",
+          "description": "Structured CVData map (personalInfo, education, experience, coverLetter, settings, etc.)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the CV was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the CV was last updated."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "title",
+        "templatePreset",
+        "exportCount",
+        "payload",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Stores user workspace preferences and account metadata."
+    },
+    "/users/{userId}/cvs/{cvId}": {
+      "schema": {
+        "$ref": "#/entities/CVDocument"
+      },
+      "description": "Subcollection storing all CV and Cover Letter documents owned by the user."
+    }
+  }
+}

@@ -1,4 +1,9 @@
-import type { CVData, DocumentMode, SectionKey } from '../shared/schema';
+import {
+  type CVData,
+  type DocumentMode,
+  isCoverLetterTemplatePreset,
+  type SectionKey,
+} from '../shared/schema';
 import { createDefaultCoverLetter } from '../shared/templates';
 import { escapeLatex, formatRichBulletLatex, sanitizeUrlLatex } from './latexEscape';
 
@@ -93,6 +98,30 @@ function cleanDisplayUrl(rawUrl: string): string {
     .replace(/\/$/, '');
 }
 
+/**
+ * Formats a paragraph that may contain inline bullet lines (starting with • or -) into LaTeX itemize blocks.
+ */
+function formatCoverLetterParagraphLatex(rawPara: string): string {
+  const lines = rawPara
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const bulletLines = lines.filter((l) => /^[•\-*]\s+/.test(l));
+  if (bulletLines.length === 0) {
+    return `\\noindent ${formatRichBulletLatex(rawPara.trim())}\\par`;
+  }
+
+  const introLines = lines.filter((l) => !/^[•\-*]\s+/.test(l));
+  const introBlock =
+    introLines.length > 0
+      ? `\\noindent ${formatRichBulletLatex(introLines.join(' '))}\\par\n\\vspace{3pt}\n`
+      : '';
+  const itemsBlock = bulletLines
+    .map((b) => `  \\item ${formatRichBulletLatex(b.replace(/^[•\-*]\s+/, ''))}`)
+    .join('\n');
+  return `${introBlock}\\begin{itemize}\n${itemsBlock}\n\\end{itemize}`;
+}
+
 function buildCoverLetterBodyBlock(
   cv: CVData,
   headerSizeMacro: string,
@@ -109,9 +138,10 @@ function buildCoverLetterBodyBlock(
   );
   const cl = hasContent ? rawCl : createDefaultCoverLetter(cv);
   const isId = cv.settings.cvLanguage === 'id';
+  const preset = cv.settings.templatePreset;
 
   const dateLine = escapeLatex(
-    cl.date.trim() || (isId ? '16 November 2026' : 'November 16, 2026')
+    cl.date.trim() || (isId ? '17 November 2026' : 'November 17, 2026')
   );
   const recipientLines: string[] = [];
   if (cl.recipientName.trim()) {
@@ -127,33 +157,123 @@ function buildCoverLetterBodyBlock(
     recipientLines.push(escapeLatex(cl.companyAddress.trim()));
   }
 
-  const subjectPrefix = isId ? 'Perihal:' : 'Re:';
-  const subjectBlock = cl.subjectLine.trim()
-    ? `\\vspace{10pt}\n\\noindent\\textbf{${subjectPrefix} ${escapeLatex(cl.subjectLine.trim())}}\\par\n`
+  const subjectPrefix = isId ? 'Perihal:' : 'Sub:';
+  const cleanSubject = cl.subjectLine.trim();
+  const hasPrefixAlready =
+    cleanSubject.toLowerCase().startsWith('perihal:') ||
+    cleanSubject.toLowerCase().startsWith('sub:') ||
+    cleanSubject.toLowerCase().startsWith('re:');
+  const subjectText = hasPrefixAlready
+    ? escapeLatex(cleanSubject)
+    : `${subjectPrefix} ${escapeLatex(cleanSubject)}`;
+
+  const subjectBlock = cleanSubject
+    ? `\\vspace{8pt}\n\\noindent\\textbf{${subjectText}}\\par\n`
     : '';
 
   const salutation = escapeLatex(
     cl.salutation.trim() ||
-      (isId ? 'Yth. Bapak/Ibu Tim Rekrutmen,' : 'Dear Hiring Manager,')
+      (isId ? 'Dengan hormat,' : 'Dear Hiring Manager,')
   );
 
-  const paragraphs: string[] = [];
+  const rawParagraphs: string[] = [];
   if (cl.openingParagraph.trim()) {
-    paragraphs.push(formatRichBulletLatex(cl.openingParagraph.trim()));
+    rawParagraphs.push(cl.openingParagraph.trim());
   }
   for (const bodyP of cl.bodyParagraphs) {
     if (bodyP.trim()) {
-      paragraphs.push(formatRichBulletLatex(bodyP.trim()));
+      rawParagraphs.push(bodyP.trim());
     }
   }
   if (cl.closingParagraph.trim()) {
-    paragraphs.push(formatRichBulletLatex(cl.closingParagraph.trim()));
+    rawParagraphs.push(cl.closingParagraph.trim());
   }
+
+  const formattedParagraphs = rawParagraphs
+    .map((p) => formatCoverLetterParagraphLatex(p))
+    .join('\n\\vspace{8pt}\n');
 
   const signOff = escapeLatex(
     cl.signOff.trim() || (isId ? 'Hormat saya,' : 'Sincerely,')
   );
 
+  const enclosures = (cl.enclosures || []).map((e) => e.trim()).filter(Boolean);
+  const enclosureBlock =
+    enclosures.length > 0
+      ? `\\vspace{14pt}\n\\noindent\\textbf{${
+          isId ? 'Lampiran (Berkas / Sertifikat Terlampir):' : 'Enclosed (Marksheets / Certificates):'
+        }}\\par\n\\vspace{3pt}\n{\\small\n${enclosures
+          .map((item) => `\\noindent ${escapeLatex(item)}\\par`)
+          .join('\n')}\n}`
+      : '';
+
+  const postscriptBlock = cl.postscript?.trim()
+    ? `\\vspace{12pt}\n\\noindent\\textit{${escapeLatex(cl.postscript.trim())}}\\par`
+    : '';
+
+  // Style 1: Overleaf cover_letter_1.tex (ModernCV Classic Indonesian Style)
+  if (preset === 'cover_letter_1') {
+    const senderRightLines = [
+      cv.personalInfo.location.trim() ? escapeLatex(cv.personalInfo.location.trim()) : '',
+      cv.personalInfo.phone.trim() ? escapeLatex(cv.personalInfo.phone.trim()) : '',
+      cv.personalInfo.email.trim() ? escapeLatex(cv.personalInfo.email.trim()) : '',
+    ].filter(Boolean);
+
+    return `% === SECTION: coverLetter ===
+\\noindent\\begin{tabular*}{\\textwidth}{@{\\extracolsep{\\fill}}lr@{}}
+  {\\LARGE\\bfseries ${headerName}} & {\\small ${senderRightLines[0] || ''}} \\\\
+  {\\small\\textit{${escapeLatex(cv.personalInfo.headline || '')}}} & {\\small ${senderRightLines.slice(1).join(' $\\cdot$ ')}}
+\\end{tabular*}
+\\vspace{4pt}
+\\noindent\\rule{\\textwidth}{0.75pt}
+\\vspace{12pt}
+
+\\noindent\\textbf{${isId ? 'Kepada Yth.' : 'To'}} \\hfill ${dateLine}\\\\
+${recipientLines.join('\\\\\n')}\\par
+${subjectBlock}\\vspace{10pt}
+\\noindent ${salutation}\\par
+\\vspace{8pt}
+${formattedParagraphs}
+\\vspace{14pt}
+\\noindent ${signOff}\\par
+\\vspace{20pt}
+\\noindent\\textbf{${headerName}}\\par
+${enclosureBlock}
+${postscriptBlock}`;
+  }
+
+  // Style 2: Overleaf simple_letter.tex (Standard \documentclass{letter} Style)
+  if (preset === 'simple_letter') {
+    const returnAddressLines = [
+      `\\textbf{${headerName}}`,
+      cv.personalInfo.location.trim() ? escapeLatex(cv.personalInfo.location.trim()) : '',
+      [cv.personalInfo.phone.trim(), cv.personalInfo.email.trim()]
+        .filter(Boolean)
+        .map((s) => escapeLatex(s))
+        .join(' $\\cdot$ '),
+    ].filter(Boolean);
+
+    return `% === SECTION: coverLetter ===
+\\begin{flushright}
+  ${returnAddressLines.join('\\\\\n  ')}\\\\[8pt]
+  ${dateLine}
+\\end{flushright}
+\\vspace{8pt}
+
+\\noindent ${recipientLines.join('\\\\\n')}\\par
+${subjectBlock}\\vspace{12pt}
+\\noindent ${salutation}\\par
+\\vspace{8pt}
+${formattedParagraphs}
+\\vspace{16pt}
+\\noindent ${signOff}\\par
+\\vspace{22pt}
+\\noindent\\textbf{${headerName}}\\par
+${postscriptBlock}
+${enclosureBlock}`;
+  }
+
+  // Default: Official Harvard OCS Cover Letter Style
   return `% === SECTION: coverLetter ===
 \\begin{center}
   {${headerSizeMacro}\\scshape\\bfseries ${headerName}}\\\\[3pt]
@@ -169,15 +289,21 @@ function buildCoverLetterBodyBlock(
 ${subjectBlock}\\vspace{10pt}
 \\noindent ${salutation}\\par
 \\vspace{8pt}
-${paragraphs.map((p) => `\\noindent ${p}\\par`).join('\n\\vspace{8pt}\n')}
+${formattedParagraphs}
 \\vspace{14pt}
 \\noindent ${signOff}\\par
 \\vspace{22pt}
-\\noindent\\textbf{${headerName}}\\par`;
+\\noindent\\textbf{${headerName}}\\par
+${enclosureBlock}
+${postscriptBlock}`;
 }
 
 export function buildHarvardLatex(cv: CVData, mode: DocumentMode = 'cv'): string {
   const { settings, personalInfo } = cv;
+  const effectiveMode: DocumentMode =
+    isCoverLetterTemplatePreset(settings.templatePreset) && mode === 'cv'
+      ? 'cover-letter'
+      : mode;
   const lang = settings.cvLanguage;
   const dateFormat = settings.dateFormat;
 
@@ -189,10 +315,15 @@ export function buildHarvardLatex(cv: CVData, mode: DocumentMode = 'cv'): string
 
   // Margin configuration
   let marginIn = '0.72in';
-  if (settings.margin === 'narrow' || settings.templatePreset === 'compact') {
-    marginIn = '0.52in';
-  } else if (settings.margin === 'compact') {
+  if (settings.margin === 'compact' || settings.templatePreset === 'jakes') {
     marginIn = '0.45in';
+  } else if (
+    settings.margin === 'narrow' ||
+    settings.templatePreset === 'compact' ||
+    settings.templatePreset === 'wharton' ||
+    settings.templatePreset === 'mckinsey'
+  ) {
+    marginIn = '0.52in';
   }
 
   // Font family package selection
@@ -205,7 +336,10 @@ export function buildHarvardLatex(cv: CVData, mode: DocumentMode = 'cv'): string
 
   // Section spacing and item spacing based on preset & user setting
   const isCompact =
-    settings.sectionSpacing === 'compact' || settings.templatePreset === 'compact';
+    settings.sectionSpacing === 'compact' ||
+    settings.templatePreset === 'compact' ||
+    settings.templatePreset === 'jakes' ||
+    settings.templatePreset === 'wharton';
   const isRelaxed = settings.sectionSpacing === 'relaxed';
 
   const sectionBeforePt = isCompact ? '5pt' : isRelaxed ? '10pt' : '7pt';
@@ -261,7 +395,9 @@ export function buildHarvardLatex(cv: CVData, mode: DocumentMode = 'cv'): string
     }
   }
 
-  const contactLine = contactParts.join(' \\enspace$\\cdot$\\enspace ');
+  const contactSeparator =
+    settings.templatePreset === 'jakes' ? ' $|$ ' : ' \\enspace$\\cdot$\\enspace ';
+  const contactLine = contactParts.join(contactSeparator);
   const headlineLine = personalInfo.headline.trim()
     ? `{\\normalsize\\textit{${escapeLatex(personalInfo.headline)}}}\\\\[2pt]\n`
     : '';
@@ -594,12 +730,20 @@ export function buildHarvardLatex(cv: CVData, mode: DocumentMode = 'cv'): string
   const headerSizeMacro =
     settings.templatePreset === 'academic' ? '\\LARGE' : '\\Huge';
 
+  let headerRuleLatex = '\\vspace{-2pt}';
+  if (settings.templatePreset === 'wharton') {
+    headerRuleLatex = '\\vspace{1pt}\n\\noindent\\rule{\\textwidth}{0.6pt}\n\\vspace{-3pt}';
+  } else if (settings.templatePreset === 'mckinsey') {
+    headerRuleLatex =
+      '\\vspace{1pt}\n\\noindent\\rule{\\textwidth}{0.9pt}\\\\[-8.5pt]\n\\noindent\\rule{\\textwidth}{0.35pt}\n\\vspace{-2pt}';
+  }
+
   const resumeBodyBlock = `% === SECTION: personalInfo ===
 \\begin{center}
   {${headerSizeMacro}\\scshape\\bfseries ${headerName}}\\\\[3pt]
   ${headlineLine}{\\small ${contactLine}}
 \\end{center}
-\\vspace{-2pt}
+${headerRuleLatex}
 ${renderedSections.join('\n\n')}`;
 
   const coverLetterBlock = buildCoverLetterBodyBlock(
@@ -611,9 +755,9 @@ ${renderedSections.join('\n\n')}`;
   );
 
   let documentBody = resumeBodyBlock;
-  if (mode === 'cover-letter') {
+  if (effectiveMode === 'cover-letter') {
     documentBody = coverLetterBlock;
-  } else if (mode === 'combined') {
+  } else if (effectiveMode === 'combined') {
     documentBody = `${coverLetterBlock}\n\\newpage\n${resumeBodyBlock}`;
   }
 

@@ -12,7 +12,13 @@ import {
   parseRichTextSpans,
 } from '../server/nativeHarvardPdfCompiler';
 import { analyzeBullet, calculateCVCompleteness } from '../shared/scoring';
-import { createSampleCVEnglish, createSampleCVIndonesian } from '../shared/templates';
+import {
+  createSampleCoverLetter1Indonesian,
+  createSampleCVEnglish,
+  createSampleCVIndonesian,
+  createSampleJakesResume,
+  createSampleSimpleLetter,
+} from '../shared/templates';
 
 describe('LaTeX Escaping & Security Utilities', () => {
   it('escapes all 10 reserved LaTeX special characters safely', () => {
@@ -126,5 +132,26 @@ describe('Harvard LaTeX Builder & Completeness Scoring', () => {
     const vecResId = await compileHarvardVectorPdf(cvId, 'cv');
     expect(vecResId.pdfBase64.length).toBeGreaterThan(1000);
     expect(vecResId.pageCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('builds and compiles Jake Resume, Cover Letter #1 (ModernCV ID), and Simple Letter templates', async () => {
+    const jakes = createSampleJakesResume('jakes-test');
+    const jakesTex = buildHarvardLatex(jakes, 'cv');
+    expect(jakesTex).toContain('$|$');
+    const jakesPdf = await compileHarvardVectorPdf(jakes, 'cv');
+    expect(jakesPdf.pdfBase64.length).toBeGreaterThan(1000);
+
+    const cl1 = createSampleCoverLetter1Indonesian('cl1-test');
+    const cl1Tex = buildHarvardLatex(cl1, 'cv');
+    expect(cl1Tex).toContain('Lampiran (Berkas / Sertifikat Terlampir)');
+    expect(cl1Tex).toContain('Dita Dwi');
+    const cl1Pdf = await compileHarvardVectorPdf(cl1, 'cv');
+    expect(cl1Pdf.pdfBase64.length).toBeGreaterThan(1000);
+
+    const simple = createSampleSimpleLetter('simple-test');
+    const simpleTex = buildHarvardLatex(simple, 'cv');
+    expect(simpleTex).toContain('P.S.');
+    const simplePdf = await compileHarvardVectorPdf(simple, 'cv');
+    expect(simplePdf.pdfBase64.length).toBeGreaterThan(1000);
   });
 });

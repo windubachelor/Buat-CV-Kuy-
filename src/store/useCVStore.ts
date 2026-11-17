@@ -1,5 +1,18 @@
+import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore';
 import { create } from 'zustand';
 import i18n from '../i18n/config';
+import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   type CVData,
   CVDataSchema,
@@ -7,9 +20,13 @@ import {
 } from '../shared/schema';
 import {
   createBlankCV,
+  createSampleCoverLetter1Indonesian,
   createSampleCVAcademic,
   createSampleCVEnglish,
   createSampleCVIndonesian,
+  createSampleJakesResume,
+  createSampleSimpleLetter,
+  type SampleCreationMode,
 } from '../shared/templates';
 
 const STORAGE_KEY_CVS = 'buatcvkuy_cvs_v1';
@@ -33,6 +50,13 @@ export interface AppPreferences {
   defaultFontSize: '10pt' | '10.5pt' | '11pt' | '11.5pt';
 }
 
+export interface AuthUserSummary {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+}
+
 const DEFAULT_PREFS: AppPreferences = {
   theme: 'light',
   uiLanguage: 'id',
@@ -41,7 +65,110 @@ const DEFAULT_PREFS: AppPreferences = {
   defaultFontSize: '11pt',
 };
 
-// Repository Layer (ready to swap with API/DB repository in the future)
+function sanitizeDocId(rawId: string): string {
+  const cleaned = rawId.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 120);
+  return cleaned || `cv-${Date.now()}`;
+}
+
+function sanitizeTitle(rawTitle: string): string {
+  const trimmed = rawTitle.trim().slice(0, 150);
+  return trimmed || 'CV Harvard Tanpa Judul';
+}
+
+function serializeCVPayloadForFirestore(cv: CVData): Record<string, unknown> {
+  // Convert to plain JSON-compatible map (no undefined values) for Firestore native map storage
+  return JSON.parse(
+    JSON.stringify({
+      personalInfo: cv.personalInfo,
+      summary: cv.summary,
+      education: cv.education,
+      experience: cv.experience,
+      leadership: cv.leadership,
+      projects: cv.projects,
+      awards: cv.awards,
+      certifications: cv.certifications,
+      publications: cv.publications,
+      skills: cv.skills,
+      customSections: cv.customSections,
+      coverLetter: cv.coverLetter,
+      sectionOrder: cv.sectionOrder,
+      settings: cv.settings,
+    })
+  ) as Record<string, unknown>;
+}
+
+async function createFirestoreCVDoc(uid: string, cv: CVData): Promise<void> {
+  const safeId = sanitizeDocId(cv.id);
+  const path = `users/${uid}/cvs/${safeId}`;
+  try {
+    await setDoc(doc(db, 'users', uid, 'cvs', safeId), {
+      id: safeId,
+      ownerId: uid,
+      title: sanitizeTitle(cv.title),
+      templatePreset: cv.settings.templatePreset || 'classic',
+      exportCount: Math.max(0, Math.floor(cv.exportCount || 0)),
+      payload: serializeCVPayloadForFirestore(cv),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+async function updateFirestoreCVDoc(uid: string, cv: CVData): Promise<void> {
+  const safeId = sanitizeDocId(cv.id);
+  const path = `users/${uid}/cvs/${safeId}`;
+  try {
+    await updateDoc(doc(db, 'users', uid, 'cvs', safeId), {
+      title: sanitizeTitle(cv.title),
+      templatePreset: cv.settings.templatePreset || 'classic',
+      exportCount: Math.max(0, Math.floor(cv.exportCount || 0)),
+      payload: serializeCVPayloadForFirestore(cv),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    // If the document doesn't exist yet on the server, create it
+    if (error instanceof Error && error.message.includes('No document to update')) {
+      await createFirestoreCVDoc(uid, cv);
+      return;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+async function deleteFirestoreCVDoc(uid: string, cvId: string): Promise<void> {
+  const safeId = sanitizeDocId(cvId);
+  const path = `users/${uid}/cvs/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'users', uid, 'cvs', safeId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+async function updateFirestoreUserPrefs(
+  uid: string,
+  displayName: string,
+  prefs: AppPreferences
+): Promise<void> {
+  const path = `users/${uid}`;
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      displayName: (displayName || 'Kandidat').slice(0, 120),
+      theme: prefs.theme,
+      uiLanguage: prefs.uiLanguage,
+      defaultPaperSize: prefs.defaultPaperSize,
+      defaultFontFamily: prefs.defaultFontFamily,
+      defaultFontSize: prefs.defaultFontSize,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+// Local Fallback & Cache Repository Layer
 export const cvRepository = {
   loadAll(): CVData[] {
     if (typeof window === 'undefined') return [];
@@ -114,6 +241,8 @@ interface CVStoreState {
   saveStatus: 'saved' | 'saving';
   prefs: AppPreferences;
   activities: ActivityLogItem[];
+  currentUser: AuthUserSummary | null;
+  authReady: boolean;
 
   // Actions
   setActiveCv: (id: string) => void;
@@ -121,7 +250,10 @@ interface CVStoreState {
   updateActiveCv: (updater: (draft: CVData) => CVData, recordHistory?: boolean) => void;
   undo: () => void;
   redo: () => void;
-  createCV: (mode: 'blank' | 'sample-id' | 'sample-en' | 'sample-academic', customSettings?: Partial<HarvardLayoutSettings>) => CVData;
+  createCV: (
+    mode: SampleCreationMode,
+    customSettings?: Partial<HarvardLayoutSettings>
+  ) => CVData;
   duplicateCV: (id: string) => CVData | undefined;
   renameCV: (id: string, newTitle: string) => void;
   deleteCV: (id: string) => void;
@@ -130,9 +262,11 @@ interface CVStoreState {
   autoFitOnePage: () => void;
   updatePrefs: (partial: Partial<AppPreferences>) => void;
   resetAllLocalData: () => void;
+  signOutUser: () => Promise<void>;
 }
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let unsubscribeCvsSnapshot: (() => void) | null = null;
 
 function applyThemeToDom(theme: 'light' | 'dark') {
   if (typeof document === 'undefined') return;
@@ -157,6 +291,8 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
   saveStatus: 'saved',
   prefs: initialPrefs,
   activities: cvRepository.loadActivities(),
+  currentUser: null,
+  authReady: false,
 
   setActiveCv: (id) => {
     if (typeof window !== 'undefined') {
@@ -193,13 +329,21 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
 
     if (autosaveTimer) clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => {
-      cvRepository.saveAll(get().cvs);
-      set({ saveStatus: 'saved' });
-    }, 800);
+      const state = get();
+      cvRepository.saveAll(state.cvs);
+      const latestActive = state.cvs.find((c) => c.id === current.id);
+      if (state.currentUser && latestActive) {
+        void updateFirestoreCVDoc(state.currentUser.uid, latestActive).finally(() => {
+          set({ saveStatus: 'saved' });
+        });
+      } else {
+        set({ saveStatus: 'saved' });
+      }
+    }, 750);
   },
 
   undo: () => {
-    const { past, future } = get();
+    const { past, future, currentUser } = get();
     const current = get().getActiveCv();
     if (past.length === 0 || !current) return;
 
@@ -216,10 +360,14 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
         saveStatus: 'saved',
       };
     });
+
+    if (currentUser) {
+      void updateFirestoreCVDoc(currentUser.uid, previous);
+    }
   },
 
   redo: () => {
-    const { past, future } = get();
+    const { past, future, currentUser } = get();
     const current = get().getActiveCv();
     if (future.length === 0 || !current) return;
 
@@ -236,10 +384,14 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
         saveStatus: 'saved',
       };
     });
+
+    if (currentUser) {
+      void updateFirestoreCVDoc(currentUser.uid, next);
+    }
   },
 
   createCV: (mode, customSettings) => {
-    const { prefs } = get();
+    const { prefs, currentUser } = get();
     const newId = `cv-${Date.now()}`;
     let created: CVData;
 
@@ -249,6 +401,12 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
       created = createSampleCVEnglish(newId);
     } else if (mode === 'sample-academic') {
       created = createSampleCVAcademic(newId);
+    } else if (mode === 'sample-jakes') {
+      created = createSampleJakesResume(newId);
+    } else if (mode === 'sample-cover-letter-1') {
+      created = createSampleCoverLetter1Indonesian(newId);
+    } else if (mode === 'sample-simple-letter') {
+      created = createSampleSimpleLetter(newId);
     } else {
       created = createBlankCV(newId, prefs.uiLanguage);
       created.settings.paperSize = prefs.defaultPaperSize;
@@ -282,16 +440,21 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
       };
     });
 
+    if (currentUser) {
+      void createFirestoreCVDoc(currentUser.uid, created);
+    }
+
     return created;
   },
 
   duplicateCV: (id) => {
+    const { currentUser } = get();
     const target = get().cvs.find((c) => c.id === id);
     if (!target) return undefined;
     const copy: CVData = {
       ...structuredClone(target),
       id: `cv-${Date.now()}`,
-      title: `${target.title} (Salinan)`,
+      title: sanitizeTitle(`${target.title} (Salinan)`),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       exportCount: 0,
@@ -313,30 +476,52 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
       return { cvs: nextCvs, activities: nextActs };
     });
 
+    if (currentUser) {
+      void createFirestoreCVDoc(currentUser.uid, copy);
+    }
+
     return copy;
   },
 
   renameCV: (id, newTitle) => {
     if (!newTitle.trim()) return;
+    const safeTitle = sanitizeTitle(newTitle);
+    const { currentUser } = get();
     set((state) => {
       const nextCvs = state.cvs.map((c) =>
         c.id === id
-          ? { ...c, title: newTitle.trim(), updatedAt: new Date().toISOString() }
+          ? { ...c, title: safeTitle, updatedAt: new Date().toISOString() }
           : c
       );
       cvRepository.saveAll(nextCvs);
+      const updated = nextCvs.find((c) => c.id === id);
+      if (currentUser && updated) {
+        void updateFirestoreCVDoc(currentUser.uid, updated);
+      }
       return { cvs: nextCvs };
     });
   },
 
   deleteCV: (id) => {
+    const { currentUser } = get();
     set((state) => {
       const remaining = state.cvs.filter((c) => c.id !== id);
-      const finalCvs =
-        remaining.length > 0 ? remaining : [createBlankCV(`cv-${Date.now()}`, state.prefs.uiLanguage)];
+      let replacement: CVData | null = null;
+      if (remaining.length === 0) {
+        replacement = createBlankCV(`cv-${Date.now()}`, state.prefs.uiLanguage);
+      }
+      const finalCvs = replacement ? [replacement] : remaining;
       cvRepository.saveAll(finalCvs);
       const nextActive =
         state.activeCvId === id ? finalCvs[0]!.id : state.activeCvId;
+
+      if (currentUser) {
+        void deleteFirestoreCVDoc(currentUser.uid, id);
+        if (replacement) {
+          void createFirestoreCVDoc(currentUser.uid, replacement);
+        }
+      }
+
       return {
         cvs: finalCvs,
         activeCvId: nextActive,
@@ -345,11 +530,17 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
   },
 
   incrementExportCount: (id) => {
+    const { currentUser } = get();
     set((state) => {
       const target = state.cvs.find((c) => c.id === id);
       const nextCvs = state.cvs.map((c) =>
         c.id === id ? { ...c, exportCount: (c.exportCount || 0) + 1 } : c
       );
+      const updated = nextCvs.find((c) => c.id === id);
+      if (currentUser && updated) {
+        void updateFirestoreCVDoc(currentUser.uid, updated);
+      }
+
       const nextActs = target
         ? [
             {
@@ -370,11 +561,13 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
   },
 
   importCVFromJson: (jsonString) => {
+    const { currentUser } = get();
     const rawObj = JSON.parse(jsonString);
     const candidate = rawObj.cv ? rawObj.cv : rawObj;
     const validated = CVDataSchema.parse({
       ...candidate,
       id: `cv-${Date.now()}`,
+      title: sanitizeTitle(candidate.title || 'CV Harvard Impor'),
       updatedAt: new Date().toISOString(),
     });
 
@@ -398,12 +591,15 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
       };
     });
 
+    if (currentUser) {
+      void createFirestoreCVDoc(currentUser.uid, validated);
+    }
+
     return validated;
   },
 
   autoFitOnePage: () => {
     get().updateActiveCv((draft) => {
-      // Progressive compact adjustments to fit 1 Harvard page
       draft.settings.templatePreset = 'compact';
       draft.settings.margin = 'compact';
       draft.settings.sectionSpacing = 'compact';
@@ -413,12 +609,20 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
   },
 
   updatePrefs: (partial) => {
+    const { currentUser } = get();
     set((state) => {
       const nextPrefs = { ...state.prefs, ...partial };
       cvRepository.savePrefs(nextPrefs);
       applyThemeToDom(nextPrefs.theme);
       if (partial.uiLanguage) {
         i18n.changeLanguage(partial.uiLanguage);
+      }
+      if (currentUser) {
+        void updateFirestoreUserPrefs(
+          currentUser.uid,
+          currentUser.displayName || 'Kandidat',
+          nextPrefs
+        );
       }
       return { prefs: nextPrefs };
     });
@@ -447,4 +651,160 @@ export const useCVStore = create<CVStoreState>((set, get) => ({
       activities: [],
     });
   },
+
+  signOutUser: async () => {
+    if (unsubscribeCvsSnapshot) {
+      unsubscribeCvsSnapshot();
+      unsubscribeCvsSnapshot = null;
+    }
+    await firebaseSignOut(auth);
+    set({ currentUser: null });
+  },
 }));
+
+// Initialize Firebase Auth & Real-Time Firestore Listener on Client Boot
+if (typeof window !== 'undefined') {
+  onAuthStateChanged(auth, async (user) => {
+    if (unsubscribeCvsSnapshot) {
+      unsubscribeCvsSnapshot();
+      unsubscribeCvsSnapshot = null;
+    }
+
+    if (!user) {
+      useCVStore.setState({ currentUser: null, authReady: true });
+      return;
+    }
+
+    const summary: AuthUserSummary = {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName || user.email?.split('@')[0] || 'Kandidat',
+      photoURL: user.photoURL,
+    };
+
+    useCVStore.setState({ currentUser: summary, authReady: true });
+
+    // Ensure UserProfile document exists in Firestore (/users/{uid})
+    const userDocRef = doc(db, 'users', user.uid);
+    const userPath = `users/${user.uid}`;
+    try {
+      const snap = await getDoc(userDocRef);
+      const currentState = useCVStore.getState();
+
+      if (!snap.exists()) {
+        // Atomic initial batch: create /users/{uid} + seed initial CVs in /users/{uid}/cvs/{cvId}
+        const batch = writeBatch(db);
+        batch.set(userDocRef, {
+          uid: user.uid,
+          displayName: (summary.displayName || 'Kandidat').slice(0, 120),
+          theme: currentState.prefs.theme,
+          uiLanguage: currentState.prefs.uiLanguage,
+          defaultPaperSize: currentState.prefs.defaultPaperSize,
+          defaultFontFamily: currentState.prefs.defaultFontFamily,
+          defaultFontSize: currentState.prefs.defaultFontSize,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        const seedCvs =
+          currentState.cvs.length > 0
+            ? currentState.cvs.slice(0, 6)
+            : [
+                createSampleCVIndonesian('sample-harvard-id'),
+                createSampleCVEnglish('sample-harvard-en'),
+              ];
+
+        for (const cv of seedCvs) {
+          const safeId = sanitizeDocId(cv.id);
+          const cvRef = doc(db, 'users', user.uid, 'cvs', safeId);
+          batch.set(cvRef, {
+            id: safeId,
+            ownerId: user.uid,
+            title: sanitizeTitle(cv.title),
+            templatePreset: cv.settings.templatePreset || 'classic',
+            exportCount: Math.max(0, Math.floor(cv.exportCount || 0)),
+            payload: serializeCVPayloadForFirestore(cv),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        await batch.commit();
+      } else {
+        const userData = snap.data();
+        if (userData) {
+          const syncedPrefs: AppPreferences = {
+            theme: userData.theme === 'dark' ? 'dark' : 'light',
+            uiLanguage: userData.uiLanguage === 'en' ? 'en' : 'id',
+            defaultPaperSize: userData.defaultPaperSize === 'letter' ? 'letter' : 'a4',
+            defaultFontFamily:
+              userData.defaultFontFamily === 'libertinus' ||
+              userData.defaultFontFamily === 'ebgaramond'
+                ? userData.defaultFontFamily
+                : 'tgtermes',
+            defaultFontSize:
+              userData.defaultFontSize === '10pt' ||
+              userData.defaultFontSize === '10.5pt' ||
+              userData.defaultFontSize === '11.5pt'
+                ? userData.defaultFontSize
+                : '11pt',
+          };
+          cvRepository.savePrefs(syncedPrefs);
+          applyThemeToDom(syncedPrefs.theme);
+          i18n.changeLanguage(syncedPrefs.uiLanguage);
+          useCVStore.setState({ prefs: syncedPrefs });
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, userPath);
+    }
+
+    // Subscribe to real-time updates on /users/{uid}/cvs
+    const cvsColPath = `users/${user.uid}/cvs`;
+    unsubscribeCvsSnapshot = onSnapshot(
+      collection(db, 'users', user.uid, 'cvs'),
+      (snapshot) => {
+        if (snapshot.empty) return;
+        const loadedCvs: CVData[] = [];
+
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data();
+          const payload = (d.payload || {}) as Record<string, unknown>;
+          const candidate = {
+            ...payload,
+            id: d.id || docSnap.id,
+            title: d.title || 'CV Harvard',
+            exportCount: typeof d.exportCount === 'number' ? d.exportCount : 0,
+            createdAt:
+              d.createdAt && typeof d.createdAt.toDate === 'function'
+                ? d.createdAt.toDate().toISOString()
+                : new Date().toISOString(),
+            updatedAt:
+              d.updatedAt && typeof d.updatedAt.toDate === 'function'
+                ? d.updatedAt.toDate().toISOString()
+                : new Date().toISOString(),
+          };
+          const parsed = CVDataSchema.safeParse(candidate);
+          if (parsed.success) {
+            loadedCvs.push(parsed.data);
+          }
+        });
+
+        if (loadedCvs.length > 0) {
+          loadedCvs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+          cvRepository.saveAll(loadedCvs);
+          useCVStore.setState((state) => ({
+            cvs: loadedCvs,
+            activeCvId:
+              state.activeCvId && loadedCvs.some((c) => c.id === state.activeCvId)
+                ? state.activeCvId
+                : loadedCvs[0]!.id,
+          }));
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, cvsColPath);
+      }
+    );
+  });
+}

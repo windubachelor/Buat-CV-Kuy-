@@ -67,7 +67,15 @@ const FAQ_ITEMS = [
 export const LandingPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { prefs, updatePrefs } = useCVStore();
+  const { prefs, updatePrefs, currentUser } = useCVStore();
+
+  const handleStartNow = () => {
+    if (currentUser) {
+      navigate('/dashboard');
+    } else {
+      navigate('/auth');
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--background)] text-[var(--foreground)] relative overflow-hidden">
@@ -123,8 +131,13 @@ export const LandingPage: React.FC = () => {
 
         {/* Zone 3: 1 Primary Action */}
         <div className="flex items-center gap-3 shrink-0">
-          <Button variant="gradient" size="sm" onClick={() => navigate('/dashboard')}>
-            <span>{t('nav.startNow')}</span>
+          {!currentUser && (
+            <Button variant="ghost" size="sm" onClick={() => navigate('/auth')}>
+              <span>Masuk / Daftar</span>
+            </Button>
+          )}
+          <Button variant="gradient" size="sm" onClick={handleStartNow}>
+            <span>{currentUser ? 'Dashboard CV' : t('nav.startNow')}</span>
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2.5} />
           </Button>
         </div>
@@ -201,7 +214,7 @@ export const LandingPage: React.FC = () => {
               </p>
 
               <div className="flex flex-wrap items-center gap-4 pt-2">
-                <Button variant="gradient" size="lg" onClick={() => navigate('/dashboard')}>
+                <Button variant="gradient" size="lg" onClick={handleStartNow}>
                   <FileText className="w-5 h-5" strokeWidth={2.5} />
                   <span>{t('landing.ctaPrimary')}</span>
                   <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" strokeWidth={2.5} />
@@ -224,18 +237,18 @@ export const LandingPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-2xl sm:text-3xl font-bold font-heading tabular-nums text-[var(--foreground)]">
-                    &lt; 400ms
+                    Firebase Cloud
                   </p>
                   <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                    Kecepatan Pratinjau Cache
+                    Tersimpan Aman di Firestore
                   </p>
                 </div>
                 <div>
                   <p className="text-2xl sm:text-3xl font-bold font-heading tabular-nums text-[var(--foreground)]">
-                    3 Preset
+                    8 Template
                   </p>
                   <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                    Classic · Compact · Academic
+                    Harvard OCS · Overleaf · Surat
                   </p>
                 </div>
               </div>
@@ -502,15 +515,15 @@ export const LandingPage: React.FC = () => {
               Siap Menyusun CV Harvard yang Membuka Pintu Wawancara?
             </h2>
             <p className="text-sm text-[var(--muted-foreground)] max-w-lg mx-auto">
-              Gratis, tersimpan otomatis di peramban Anda, dan langsung menghasilkan dokumen PDF LaTeX berstandar internasional.
+              Gratis, tersimpan otomatis di Cloud Firebase Anda, dan langsung menghasilkan dokumen PDF LaTeX berstandar internasional.
             </p>
             <div className="flex flex-wrap justify-center gap-3 pt-2">
-              <Button variant="gradient" size="lg" onClick={() => navigate('/dashboard')}>
-                <span>Buka Ruang Kerja Sekarang</span>
+              <Button variant="gradient" size="lg" onClick={handleStartNow}>
+                <span>{currentUser ? 'Buka Ruang Kerja Sekarang' : 'Masuk & Mulai Buat CV Sekarang'}</span>
                 <ArrowRight className="w-5 h-5" strokeWidth={2.5} />
               </Button>
               <Button variant="outline" size="lg" onClick={() => navigate('/templates')}>
-                <span>Lihat 3 Preset Harvard</span>
+                <span>Lihat 8 Template LaTeX</span>
               </Button>
             </div>
           </div>

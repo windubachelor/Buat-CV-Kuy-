@@ -151,6 +151,19 @@ var SectionConfigItemSchema = z.object({
   visible: z.boolean().default(true),
   customTitle: z.string().max(100).optional()
 });
+var TemplatePresetSchema = z.enum([
+  "classic",
+  "compact",
+  "academic",
+  "jakes",
+  "wharton",
+  "mckinsey",
+  "cover_letter_1",
+  "simple_letter"
+]).default("classic");
+function isCoverLetterTemplatePreset(preset) {
+  return preset === "cover_letter_1" || preset === "simple_letter";
+}
 var HarvardLayoutSettingsSchema = z.object({
   paperSize: z.enum(["a4", "letter"]).default("a4"),
   fontSize: z.enum(["10pt", "10.5pt", "11pt", "11.5pt"]).default("11pt"),
@@ -160,7 +173,7 @@ var HarvardLayoutSettingsSchema = z.object({
   showLinksIcon: z.boolean().default(false),
   dateFormat: z.enum(["short", "numeric", "long"]).default("short"),
   cvLanguage: z.enum(["id", "en"]).default("id"),
-  templatePreset: z.enum(["classic", "compact", "academic"]).default("classic")
+  templatePreset: TemplatePresetSchema
 });
 var DEFAULT_SECTION_ORDER = [
   { key: "summary", visible: true },
@@ -186,7 +199,9 @@ var CoverLetterSchema = z.object({
   openingParagraph: z.string().max(1800).default(""),
   bodyParagraphs: z.array(z.string().max(2e3)).default([]),
   closingParagraph: z.string().max(1500).default(""),
-  signOff: z.string().max(100).default("")
+  signOff: z.string().max(100).default(""),
+  enclosures: z.array(z.string().max(300)).default([]),
+  postscript: z.string().max(600).default("")
 });
 var DEFAULT_COVER_LETTER = {
   enabled: true,
@@ -200,7 +215,9 @@ var DEFAULT_COVER_LETTER = {
   openingParagraph: "",
   bodyParagraphs: [],
   closingParagraph: "",
-  signOff: ""
+  signOff: "",
+  enclosures: [],
+  postscript: ""
 };
 var DocumentModeSchema = z.enum(["cv", "cover-letter", "combined"]).default("cv");
 var CVDataSchema = z.object({
@@ -238,7 +255,7 @@ function createDefaultCoverLetter(cv) {
   if (isId) {
     return {
       enabled: true,
-      date: "16 November 2026",
+      date: "17 November 2026",
       recipientName: "Tim Rekrutmen & Akuisisi Talenta",
       recipientTitle: "Divisi Sumber Daya Manusia",
       companyName: "Nama Perusahaan Tujuan",
@@ -251,12 +268,19 @@ function createDefaultCoverLetter(cv) {
         "Saya sangat mengagumi komitmen perusahaan Bapak/Ibu terhadap inovasi dan keunggulan operasional. Dengan perpaduan kompetensi teknis, kemampuan analitis, dan kepemimpinan tim yang saya miliki, saya yakin dapat memberikan kontribusi positif sejak hari pertama bergabung."
       ],
       closingParagraph: "Sebagai bahan pertimbangan, bersama surat ini saya lampirkan Resume/CV standar Harvard OCS saya. Saya sangat mengharapkan kesempatan wawancara untuk mendiskusikan lebih lanjut bagaimana kualifikasi saya dapat mendukung target tim Bapak/Ibu. Terima kasih atas waktu dan perhatiannya.",
-      signOff: "Hormat saya,"
+      signOff: "Hormat saya,",
+      enclosures: [
+        "1. Ijazah & Transkrip Nilai Akademik",
+        "2. Curriculum Vitae (CV) Terbaru",
+        "3. Sertifikat Kompetensi & Pelatihan",
+        "4. Portofolio & Dokumen Pendukung"
+      ],
+      postscript: ""
     };
   }
   return {
     enabled: true,
-    date: "November 16, 2026",
+    date: "November 17, 2026",
     recipientName: "Hiring Committee",
     recipientTitle: "Talent Acquisition Team",
     companyName: "Target Company Name",
@@ -269,7 +293,13 @@ function createDefaultCoverLetter(cv) {
       "I have closely followed your organization\u2019s growth and commitment to excellence. My combination of technical depth, analytical rigor, and collaborative leadership positions me well to contribute immediately to your team\u2019s objectives."
     ],
     closingParagraph: "Enclosed is my resume detailing my qualifications and achievements. I would welcome the opportunity to discuss how my background aligns with your team\u2019s needs. Thank you very much for your time and consideration.",
-    signOff: "Sincerely,"
+    signOff: "Sincerely,",
+    enclosures: [
+      "1. Academic Transcripts & Degree Certificates",
+      "2. Updated Curriculum Vitae (Resume)",
+      "3. Professional Certifications"
+    ],
+    postscript: ""
   };
 }
 
@@ -478,6 +508,21 @@ function formatDateRange(startDate, endDate, isCurrent, format, lang) {
 function cleanDisplayUrl(rawUrl) {
   return rawUrl.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "");
 }
+function formatCoverLetterParagraphLatex(rawPara) {
+  const lines = rawPara.split("\n").map((l) => l.trim()).filter(Boolean);
+  const bulletLines = lines.filter((l) => /^[•\-*]\s+/.test(l));
+  if (bulletLines.length === 0) {
+    return `\\noindent ${formatRichBulletLatex(rawPara.trim())}\\par`;
+  }
+  const introLines = lines.filter((l) => !/^[•\-*]\s+/.test(l));
+  const introBlock = introLines.length > 0 ? `\\noindent ${formatRichBulletLatex(introLines.join(" "))}\\par
+\\vspace{3pt}
+` : "";
+  const itemsBlock = bulletLines.map((b) => `  \\item ${formatRichBulletLatex(b.replace(/^[•\-*]\s+/, ""))}`).join("\n");
+  return `${introBlock}\\begin{itemize}
+${itemsBlock}
+\\end{itemize}`;
+}
 function buildCoverLetterBodyBlock(cv, headerSizeMacro, headerName, headlineLine, contactLine) {
   const rawCl = cv.coverLetter;
   const hasContent = Boolean(
@@ -485,8 +530,9 @@ function buildCoverLetterBodyBlock(cv, headerSizeMacro, headerName, headlineLine
   );
   const cl = hasContent ? rawCl : createDefaultCoverLetter(cv);
   const isId = cv.settings.cvLanguage === "id";
+  const preset = cv.settings.templatePreset;
   const dateLine = escapeLatex(
-    cl.date.trim() || (isId ? "16 November 2026" : "November 16, 2026")
+    cl.date.trim() || (isId ? "17 November 2026" : "November 17, 2026")
   );
   const recipientLines = [];
   if (cl.recipientName.trim()) {
@@ -501,28 +547,94 @@ function buildCoverLetterBodyBlock(cv, headerSizeMacro, headerName, headlineLine
   if (cl.companyAddress.trim()) {
     recipientLines.push(escapeLatex(cl.companyAddress.trim()));
   }
-  const subjectPrefix = isId ? "Perihal:" : "Re:";
-  const subjectBlock = cl.subjectLine.trim() ? `\\vspace{10pt}
-\\noindent\\textbf{${subjectPrefix} ${escapeLatex(cl.subjectLine.trim())}}\\par
+  const subjectPrefix = isId ? "Perihal:" : "Sub:";
+  const cleanSubject = cl.subjectLine.trim();
+  const hasPrefixAlready = cleanSubject.toLowerCase().startsWith("perihal:") || cleanSubject.toLowerCase().startsWith("sub:") || cleanSubject.toLowerCase().startsWith("re:");
+  const subjectText = hasPrefixAlready ? escapeLatex(cleanSubject) : `${subjectPrefix} ${escapeLatex(cleanSubject)}`;
+  const subjectBlock = cleanSubject ? `\\vspace{8pt}
+\\noindent\\textbf{${subjectText}}\\par
 ` : "";
   const salutation = escapeLatex(
-    cl.salutation.trim() || (isId ? "Yth. Bapak/Ibu Tim Rekrutmen," : "Dear Hiring Manager,")
+    cl.salutation.trim() || (isId ? "Dengan hormat," : "Dear Hiring Manager,")
   );
-  const paragraphs = [];
+  const rawParagraphs = [];
   if (cl.openingParagraph.trim()) {
-    paragraphs.push(formatRichBulletLatex(cl.openingParagraph.trim()));
+    rawParagraphs.push(cl.openingParagraph.trim());
   }
   for (const bodyP of cl.bodyParagraphs) {
     if (bodyP.trim()) {
-      paragraphs.push(formatRichBulletLatex(bodyP.trim()));
+      rawParagraphs.push(bodyP.trim());
     }
   }
   if (cl.closingParagraph.trim()) {
-    paragraphs.push(formatRichBulletLatex(cl.closingParagraph.trim()));
+    rawParagraphs.push(cl.closingParagraph.trim());
   }
+  const formattedParagraphs = rawParagraphs.map((p) => formatCoverLetterParagraphLatex(p)).join("\n\\vspace{8pt}\n");
   const signOff = escapeLatex(
     cl.signOff.trim() || (isId ? "Hormat saya," : "Sincerely,")
   );
+  const enclosures = (cl.enclosures || []).map((e) => e.trim()).filter(Boolean);
+  const enclosureBlock = enclosures.length > 0 ? `\\vspace{14pt}
+\\noindent\\textbf{${isId ? "Lampiran (Berkas / Sertifikat Terlampir):" : "Enclosed (Marksheets / Certificates):"}}\\par
+\\vspace{3pt}
+{\\small
+${enclosures.map((item) => `\\noindent ${escapeLatex(item)}\\par`).join("\n")}
+}` : "";
+  const postscriptBlock = cl.postscript?.trim() ? `\\vspace{12pt}
+\\noindent\\textit{${escapeLatex(cl.postscript.trim())}}\\par` : "";
+  if (preset === "cover_letter_1") {
+    const senderRightLines = [
+      cv.personalInfo.location.trim() ? escapeLatex(cv.personalInfo.location.trim()) : "",
+      cv.personalInfo.phone.trim() ? escapeLatex(cv.personalInfo.phone.trim()) : "",
+      cv.personalInfo.email.trim() ? escapeLatex(cv.personalInfo.email.trim()) : ""
+    ].filter(Boolean);
+    return `% === SECTION: coverLetter ===
+\\noindent\\begin{tabular*}{\\textwidth}{@{\\extracolsep{\\fill}}lr@{}}
+  {\\LARGE\\bfseries ${headerName}} & {\\small ${senderRightLines[0] || ""}} \\\\
+  {\\small\\textit{${escapeLatex(cv.personalInfo.headline || "")}}} & {\\small ${senderRightLines.slice(1).join(" $\\cdot$ ")}}
+\\end{tabular*}
+\\vspace{4pt}
+\\noindent\\rule{\\textwidth}{0.75pt}
+\\vspace{12pt}
+
+\\noindent\\textbf{${isId ? "Kepada Yth." : "To"}} \\hfill ${dateLine}\\\\
+${recipientLines.join("\\\\\n")}\\par
+${subjectBlock}\\vspace{10pt}
+\\noindent ${salutation}\\par
+\\vspace{8pt}
+${formattedParagraphs}
+\\vspace{14pt}
+\\noindent ${signOff}\\par
+\\vspace{20pt}
+\\noindent\\textbf{${headerName}}\\par
+${enclosureBlock}
+${postscriptBlock}`;
+  }
+  if (preset === "simple_letter") {
+    const returnAddressLines = [
+      `\\textbf{${headerName}}`,
+      cv.personalInfo.location.trim() ? escapeLatex(cv.personalInfo.location.trim()) : "",
+      [cv.personalInfo.phone.trim(), cv.personalInfo.email.trim()].filter(Boolean).map((s) => escapeLatex(s)).join(" $\\cdot$ ")
+    ].filter(Boolean);
+    return `% === SECTION: coverLetter ===
+\\begin{flushright}
+  ${returnAddressLines.join("\\\\\n  ")}\\\\[8pt]
+  ${dateLine}
+\\end{flushright}
+\\vspace{8pt}
+
+\\noindent ${recipientLines.join("\\\\\n")}\\par
+${subjectBlock}\\vspace{12pt}
+\\noindent ${salutation}\\par
+\\vspace{8pt}
+${formattedParagraphs}
+\\vspace{16pt}
+\\noindent ${signOff}\\par
+\\vspace{22pt}
+\\noindent\\textbf{${headerName}}\\par
+${postscriptBlock}
+${enclosureBlock}`;
+  }
   return `% === SECTION: coverLetter ===
 \\begin{center}
   {${headerSizeMacro}\\scshape\\bfseries ${headerName}}\\\\[3pt]
@@ -538,23 +650,26 @@ function buildCoverLetterBodyBlock(cv, headerSizeMacro, headerName, headlineLine
 ${subjectBlock}\\vspace{10pt}
 \\noindent ${salutation}\\par
 \\vspace{8pt}
-${paragraphs.map((p) => `\\noindent ${p}\\par`).join("\n\\vspace{8pt}\n")}
+${formattedParagraphs}
 \\vspace{14pt}
 \\noindent ${signOff}\\par
 \\vspace{22pt}
-\\noindent\\textbf{${headerName}}\\par`;
+\\noindent\\textbf{${headerName}}\\par
+${enclosureBlock}
+${postscriptBlock}`;
 }
 function buildHarvardLatex(cv, mode = "cv") {
   const { settings, personalInfo } = cv;
+  const effectiveMode = isCoverLetterTemplatePreset(settings.templatePreset) && mode === "cv" ? "cover-letter" : mode;
   const lang = settings.cvLanguage;
   const dateFormat = settings.dateFormat;
   const paperOption = settings.paperSize === "letter" ? "letterpaper" : "a4paper";
   const baseDocFontPt = settings.fontSize === "10pt" || settings.fontSize === "10.5pt" ? "10pt" : "11pt";
   let marginIn = "0.72in";
-  if (settings.margin === "narrow" || settings.templatePreset === "compact") {
-    marginIn = "0.52in";
-  } else if (settings.margin === "compact") {
+  if (settings.margin === "compact" || settings.templatePreset === "jakes") {
     marginIn = "0.45in";
+  } else if (settings.margin === "narrow" || settings.templatePreset === "compact" || settings.templatePreset === "wharton" || settings.templatePreset === "mckinsey") {
+    marginIn = "0.52in";
   }
   let fontPackageLatex = "\\usepackage{tgtermes}";
   if (settings.fontFamily === "libertinus") {
@@ -562,7 +677,7 @@ function buildHarvardLatex(cv, mode = "cv") {
   } else if (settings.fontFamily === "ebgaramond") {
     fontPackageLatex = "\\usepackage{ebgaramond}";
   }
-  const isCompact = settings.sectionSpacing === "compact" || settings.templatePreset === "compact";
+  const isCompact = settings.sectionSpacing === "compact" || settings.templatePreset === "compact" || settings.templatePreset === "jakes" || settings.templatePreset === "wharton";
   const isRelaxed = settings.sectionSpacing === "relaxed";
   const sectionBeforePt = isCompact ? "5pt" : isRelaxed ? "10pt" : "7pt";
   const sectionAfterPt = isCompact ? "3pt" : isRelaxed ? "6pt" : "4pt";
@@ -612,7 +727,8 @@ function buildHarvardLatex(cv, mode = "cv") {
       contactParts.push(safeUrl ? `\\href{${safeUrl}}{${display}}` : display);
     }
   }
-  const contactLine = contactParts.join(" \\enspace$\\cdot$\\enspace ");
+  const contactSeparator = settings.templatePreset === "jakes" ? " $|$ " : " \\enspace$\\cdot$\\enspace ";
+  const contactLine = contactParts.join(contactSeparator);
   const headlineLine = personalInfo.headline.trim() ? `{\\normalsize\\textit{${escapeLatex(personalInfo.headline)}}}\\\\[2pt]
 ` : "";
   const renderedSections = [];
@@ -901,12 +1017,18 @@ ${cleanBullets.map((b) => `  \\item ${formatRichBulletLatex(b)}`).join("\n")}
   const titleMeta = escapeLatex(cv.title || `${personalInfo.fullName} - Resume`);
   const headerName = escapeLatex(personalInfo.fullName || "NAMA LENGKAP");
   const headerSizeMacro = settings.templatePreset === "academic" ? "\\LARGE" : "\\Huge";
+  let headerRuleLatex = "\\vspace{-2pt}";
+  if (settings.templatePreset === "wharton") {
+    headerRuleLatex = "\\vspace{1pt}\n\\noindent\\rule{\\textwidth}{0.6pt}\n\\vspace{-3pt}";
+  } else if (settings.templatePreset === "mckinsey") {
+    headerRuleLatex = "\\vspace{1pt}\n\\noindent\\rule{\\textwidth}{0.9pt}\\\\[-8.5pt]\n\\noindent\\rule{\\textwidth}{0.35pt}\n\\vspace{-2pt}";
+  }
   const resumeBodyBlock = `% === SECTION: personalInfo ===
 \\begin{center}
   {${headerSizeMacro}\\scshape\\bfseries ${headerName}}\\\\[3pt]
   ${headlineLine}{\\small ${contactLine}}
 \\end{center}
-\\vspace{-2pt}
+${headerRuleLatex}
 ${renderedSections.join("\n\n")}`;
   const coverLetterBlock = buildCoverLetterBodyBlock(
     cv,
@@ -916,9 +1038,9 @@ ${renderedSections.join("\n\n")}`;
     contactLine
   );
   let documentBody = resumeBodyBlock;
-  if (mode === "cover-letter") {
+  if (effectiveMode === "cover-letter") {
     documentBody = coverLetterBlock;
-  } else if (mode === "combined") {
+  } else if (effectiveMode === "combined") {
     documentBody = `${coverLetterBlock}
 \\newpage
 ${resumeBodyBlock}`;
@@ -1150,14 +1272,14 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
   const pageWidth = isLetter ? 612 : 595.28;
   const pageHeight = isLetter ? 792 : 841.89;
   let marginIn = 0.72;
-  if (settings.margin === "narrow" || settings.templatePreset === "compact") {
-    marginIn = 0.52;
-  } else if (settings.margin === "compact") {
+  if (settings.margin === "compact" || settings.templatePreset === "jakes") {
     marginIn = 0.45;
+  } else if (settings.margin === "narrow" || settings.templatePreset === "compact" || settings.templatePreset === "wharton" || settings.templatePreset === "mckinsey") {
+    marginIn = 0.52;
   }
   const marginPt = Number((marginIn * 72).toFixed(2));
   const baseSize = settings.fontSize === "10pt" ? 10 : settings.fontSize === "10.5pt" ? 10.5 : settings.fontSize === "11.5pt" ? 11.5 : 11;
-  const isCompact = settings.sectionSpacing === "compact" || settings.templatePreset === "compact";
+  const isCompact = settings.sectionSpacing === "compact" || settings.templatePreset === "compact" || settings.templatePreset === "jakes" || settings.templatePreset === "wharton";
   const isRelaxed = settings.sectionSpacing === "relaxed";
   const lineMultiplier = isCompact ? 1.11 : isRelaxed ? 1.21 : 1.15;
   const lineHeight = Number((baseSize * lineMultiplier).toFixed(2));
@@ -1262,10 +1384,41 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       }
     }
     if (contacts.length > 0) {
-      const contactLine = contacts.join("   \xB7   ");
+      const sep = settings.templatePreset === "jakes" ? "   |   " : "   \xB7   ";
+      const contactLine = contacts.join(sep);
       drawCenteredText(contactLine, baseSize - 0.9, fontRegular, rgb(0.06, 0.06, 0.06));
     }
-    cursorY -= 1;
+    if (settings.templatePreset === "wharton") {
+      cursorY -= 2;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.65,
+        color: rgb(0, 0, 0)
+      });
+      cursorY -= 2;
+    } else if (settings.templatePreset === "mckinsey") {
+      cursorY -= 2;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.95,
+        color: rgb(0, 0, 0)
+      });
+      cursorY -= 2;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.35,
+        color: rgb(0, 0, 0)
+      });
+      cursorY -= 2;
+    } else {
+      cursorY -= 1;
+    }
   };
   const drawSectionHeading = (title) => {
     const headingCapSize = baseSize + 1.2;
@@ -1447,25 +1600,58 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
     return left || right || "";
   };
   const renderCoverLetter = () => {
-    drawHeaderBlock();
-    currentPage.drawRectangle({
-      x: marginPt,
-      y: cursorY + 1,
-      width: contentWidth,
-      height: 0.6,
-      color: rgb(0, 0, 0)
-    });
-    cursorY -= 12;
     const rawCl = cv.coverLetter;
     const hasContent = Boolean(
-      rawCl && (rawCl.openingParagraph?.trim() || rawCl.bodyParagraphs?.some((p) => p.trim()) || rawCl.closingParagraph?.trim())
+      rawCl && (rawCl.openingParagraph?.trim() || rawCl.bodyParagraphs?.some((p2) => p2.trim()) || rawCl.closingParagraph?.trim())
     );
     const cl = hasContent ? rawCl : createDefaultCoverLetter(cv);
+    const preset = settings.templatePreset;
+    const p = cv.personalInfo;
     const dateLine = sanitizeWinAnsi(
-      cl.date?.trim() || (lang === "id" ? "16 November 2026" : "November 16, 2026")
+      cl.date?.trim() || (lang === "id" ? "17 November 2026" : "November 17, 2026")
     );
-    drawRichParagraph([{ text: dateLine }], { justify: false });
-    cursorY -= 9;
+    if (preset === "cover_letter_1") {
+      const rightTop = p.location?.trim() || "";
+      const rightBottom = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(" \xB7 ");
+      drawTwoColRow(p.fullName || "Nama Lengkap", rightTop, fontBold, fontRegular, baseSize + 3.5);
+      if (p.headline?.trim() || rightBottom) {
+        drawTwoColRow(p.headline?.trim() || "", rightBottom, fontItalic, fontRegular, baseSize - 0.8);
+      }
+      cursorY -= 2;
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY,
+        width: contentWidth,
+        height: 0.75,
+        color: rgb(0, 0, 0)
+      });
+      cursorY -= 12;
+      drawTwoColRow(lang === "id" ? "Kepada Yth." : "To", dateLine, fontBold, fontRegular);
+    } else if (preset === "simple_letter") {
+      drawTwoColRow("", p.fullName || "Nama Lengkap", fontRegular, fontBold);
+      if (p.location?.trim()) {
+        drawTwoColRow("", p.location.trim(), fontRegular, fontRegular, baseSize - 0.5);
+      }
+      const contactPair = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(" \xB7 ");
+      if (contactPair) {
+        drawTwoColRow("", contactPair, fontRegular, fontRegular, baseSize - 0.5);
+      }
+      cursorY -= 6;
+      drawTwoColRow("", dateLine, fontRegular, fontRegular);
+      cursorY -= 10;
+    } else {
+      drawHeaderBlock();
+      currentPage.drawRectangle({
+        x: marginPt,
+        y: cursorY + 1,
+        width: contentWidth,
+        height: 0.6,
+        color: rgb(0, 0, 0)
+      });
+      cursorY -= 12;
+      drawRichParagraph([{ text: dateLine }], { justify: false });
+      cursorY -= 9;
+    }
     if (cl.recipientName?.trim()) {
       drawRichParagraph([{ text: sanitizeWinAnsi(cl.recipientName.trim()), bold: true }], {
         justify: false
@@ -1486,34 +1672,72 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
     }
     cursorY -= 9;
     if (cl.subjectLine?.trim()) {
-      const prefix = lang === "id" ? "Perihal: " : "Re: ";
-      const text = cl.subjectLine.trim().toLowerCase().startsWith("perihal") || cl.subjectLine.trim().toLowerCase().startsWith("re:") ? cl.subjectLine.trim() : `${prefix}${cl.subjectLine.trim()}`;
+      const prefix = lang === "id" ? "Perihal: " : "Sub: ";
+      const text = cl.subjectLine.trim().toLowerCase().startsWith("perihal") || cl.subjectLine.trim().toLowerCase().startsWith("sub:") || cl.subjectLine.trim().toLowerCase().startsWith("re:") ? cl.subjectLine.trim() : `${prefix}${cl.subjectLine.trim()}`;
       drawRichParagraph([{ text: sanitizeWinAnsi(text), bold: true }], { justify: false });
       cursorY -= 9;
     }
-    const salutation = cl.salutation?.trim() || (lang === "id" ? "Yth. Bapak/Ibu Tim Rekrutmen," : "Dear Hiring Manager,");
+    const salutation = cl.salutation?.trim() || (lang === "id" ? "Dengan hormat," : "Dear Hiring Manager,");
     drawRichParagraph([{ text: sanitizeWinAnsi(salutation) }], { justify: false });
     cursorY -= 8;
     const paragraphs = [
       cl.openingParagraph,
       ...cl.bodyParagraphs || [],
       cl.closingParagraph
-    ].map((p) => p?.trim()).filter((p) => Boolean(p));
+    ].map((pItem) => pItem?.trim()).filter((pItem) => Boolean(pItem));
     for (const para of paragraphs) {
-      const subParas = para.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
-      for (const sp of subParas) {
-        drawRichParagraph(parseRichTextSpans(sp), { lineGapMultiplier: 1.26, justify: true });
-        cursorY -= 8;
+      const lines = para.split("\n").map((l) => l.trim()).filter(Boolean);
+      const bulletLines = lines.filter((l) => /^[•\-*]\s+/.test(l));
+      if (bulletLines.length > 0) {
+        const introLines = lines.filter((l) => !/^[•\-*]\s+/.test(l));
+        if (introLines.length > 0) {
+          drawRichParagraph(parseRichTextSpans(introLines.join(" ")), {
+            lineGapMultiplier: 1.24,
+            justify: true
+          });
+          cursorY -= 3;
+        }
+        drawBullets(bulletLines.map((b) => b.replace(/^[•\-*]\s+/, "")));
+        cursorY -= 6;
+      } else {
+        const subParas = para.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+        for (const sp of subParas) {
+          drawRichParagraph(parseRichTextSpans(sp), { lineGapMultiplier: 1.24, justify: true });
+          cursorY -= 8;
+        }
       }
     }
-    cursorY -= 6;
+    cursorY -= 4;
     const signOff = cl.signOff?.trim() || (lang === "id" ? "Hormat saya," : "Sincerely,");
     drawRichParagraph([{ text: sanitizeWinAnsi(signOff) }], { justify: false });
-    cursorY -= 20;
+    cursorY -= 18;
     drawRichParagraph(
       [{ text: sanitizeWinAnsi(cv.personalInfo.fullName || "Candidate"), bold: true }],
       { justify: false }
     );
+    const enclosures = (cl.enclosures || []).map((e) => e.trim()).filter(Boolean);
+    if (enclosures.length > 0) {
+      cursorY -= 10;
+      const encTitle = lang === "id" ? "Lampiran (Berkas / Sertifikat Terlampir):" : "Enclosed (Marksheets / Certificates):";
+      drawRichParagraph([{ text: encTitle, bold: true }], {
+        size: baseSize - 0.5,
+        justify: false
+      });
+      cursorY -= 2;
+      for (const item of enclosures) {
+        drawRichParagraph([{ text: sanitizeWinAnsi(item) }], {
+          size: baseSize - 0.9,
+          justify: false
+        });
+      }
+    }
+    if (cl.postscript?.trim()) {
+      cursorY -= 10;
+      drawRichParagraph([{ text: sanitizeWinAnsi(cl.postscript.trim()), italic: true }], {
+        size: baseSize - 0.4,
+        justify: true
+      });
+    }
   };
   const renderCVBody = () => {
     drawHeaderBlock();
@@ -1770,9 +1994,10 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       renderSectionByKey(secConfig.key, secConfig.customTitle);
     }
   };
-  if (mode === "cover-letter") {
+  const effectiveMode = isCoverLetterTemplatePreset(settings.templatePreset) && mode === "cv" ? "cover-letter" : mode;
+  if (effectiveMode === "cover-letter") {
     renderCoverLetter();
-  } else if (mode === "combined") {
+  } else if (effectiveMode === "combined") {
     renderCoverLetter();
     currentPage = pdfDoc.addPage([pageWidth, pageHeight]);
     cursorY = pageHeight - marginPt;

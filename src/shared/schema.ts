@@ -152,6 +152,25 @@ export const SectionConfigItemSchema = z.object({
 
 export type SectionConfigItem = z.infer<typeof SectionConfigItemSchema>;
 
+export const TemplatePresetSchema = z
+  .enum([
+    'classic',
+    'compact',
+    'academic',
+    'jakes',
+    'wharton',
+    'mckinsey',
+    'cover_letter_1',
+    'simple_letter',
+  ])
+  .default('classic');
+
+export type TemplatePreset = z.infer<typeof TemplatePresetSchema>;
+
+export function isCoverLetterTemplatePreset(preset?: string): boolean {
+  return preset === 'cover_letter_1' || preset === 'simple_letter';
+}
+
 export const HarvardLayoutSettingsSchema = z.object({
   paperSize: z.enum(['a4', 'letter']).default('a4'),
   fontSize: z.enum(['10pt', '10.5pt', '11pt', '11.5pt']).default('11pt'),
@@ -161,7 +180,7 @@ export const HarvardLayoutSettingsSchema = z.object({
   showLinksIcon: z.boolean().default(false),
   dateFormat: z.enum(['short', 'numeric', 'long']).default('short'),
   cvLanguage: z.enum(['id', 'en']).default('id'),
-  templatePreset: z.enum(['classic', 'compact', 'academic']).default('classic'),
+  templatePreset: TemplatePresetSchema,
 });
 
 export type HarvardLayoutSettings = z.infer<typeof HarvardLayoutSettingsSchema>;
@@ -192,6 +211,8 @@ export const CoverLetterSchema = z.object({
   bodyParagraphs: z.array(z.string().max(2000)).default([]),
   closingParagraph: z.string().max(1500).default(''),
   signOff: z.string().max(100).default(''),
+  enclosures: z.array(z.string().max(300)).default([]),
+  postscript: z.string().max(600).default(''),
 });
 
 export type CoverLetterData = z.infer<typeof CoverLetterSchema>;
@@ -209,6 +230,8 @@ export const DEFAULT_COVER_LETTER: CoverLetterData = {
   bodyParagraphs: [],
   closingParagraph: '',
   signOff: '',
+  enclosures: [],
+  postscript: '',
 };
 
 export const DocumentModeSchema = z.enum(['cv', 'cover-letter', 'combined']).default('cv');

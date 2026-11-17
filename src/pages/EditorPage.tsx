@@ -47,7 +47,11 @@ import {
   cn,
 } from '../components/ui/primitives';
 import { buildHarvardLatex } from '../server/latexBuilder';
-import type { CompileResponse, DocumentMode } from '../shared/schema';
+import {
+  type CompileResponse,
+  type DocumentMode,
+  isCoverLetterTemplatePreset,
+} from '../shared/schema';
 import { calculateCVCompleteness } from '../shared/scoring';
 import { useCVStore } from '../store/useCVStore';
 
@@ -100,6 +104,9 @@ export const EditorPage: React.FC = () => {
   }, [id, setActiveCv]);
 
   const activeCv = getActiveCv();
+  const isDedicatedCoverLetter = Boolean(
+    activeCv && isCoverLetterTemplatePreset(activeCv.settings.templatePreset)
+  );
 
   const [activeSection, setActiveSection] = useState<ActiveEditorSection>('personalInfo');
   const [documentMode, setDocumentMode] = useState<DocumentMode>('cv');
@@ -108,6 +115,32 @@ export const EditorPage: React.FC = () => {
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [spaceOptimizerOpen, setSpaceOptimizerOpen] = useState(false);
   const [syncPulse, setSyncPulse] = useState(false);
+
+  // Automatically switch to Cover Letter mode & section when a dedicated Cover Letter preset is selected
+  useEffect(() => {
+    if (isDedicatedCoverLetter) {
+      setDocumentMode('cover-letter');
+      setActiveSection((prev) =>
+        prev === 'personalInfo' || prev === 'coverLetter' || prev === 'layout'
+          ? prev
+          : 'coverLetter'
+      );
+    }
+  }, [isDedicatedCoverLetter, activeCv?.id, activeCv?.settings.templatePreset]);
+
+  const visibleRailItems = useMemo(() => {
+    if (!isDedicatedCoverLetter) return SECTION_RAIL_ITEMS;
+    return SECTION_RAIL_ITEMS.filter(
+      (item) =>
+        item.id === 'personalInfo' || item.id === 'coverLetter' || item.id === 'layout'
+    ).map((item) =>
+      item.id === 'personalInfo'
+        ? { ...item, labelId: 'Pengirim', labelEn: 'Sender' }
+        : item.id === 'coverLetter'
+          ? { ...item, labelId: 'Isi Surat', labelEn: 'Letter Body' }
+          : item
+    );
+  }, [isDedicatedCoverLetter]);
 
   // Resizable & Collapsible right preview pane state
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
@@ -132,16 +165,22 @@ export const EditorPage: React.FC = () => {
     [activeCv, prefs.uiLanguage]
   );
 
+  const effectiveDocumentMode: DocumentMode = isDedicatedCoverLetter
+    ? 'cover-letter'
+    : documentMode;
+
   const liveTexSource = useMemo(
-    () => (activeCv ? buildHarvardLatex(activeCv, documentMode) : ''),
-    [activeCv, documentMode]
+    () => (activeCv ? buildHarvardLatex(activeCv, effectiveDocumentMode) : ''),
+    [activeCv, effectiveDocumentMode]
   );
 
   // Bidirectional Click-to-Sync handler (from PDF Preview or Rail)
   const handleSelectSection = useCallback(
     (nextSection: ActiveEditorSection, fromPreview = false) => {
       setActiveSection(nextSection);
-      if (nextSection === 'coverLetter' && documentMode === 'cv') {
+      if (isDedicatedCoverLetter) {
+        setDocumentMode('cover-letter');
+      } else if (nextSection === 'coverLetter' && documentMode === 'cv') {
         setDocumentMode('cover-letter');
       } else if (
         nextSection !== 'coverLetter' &&
@@ -162,7 +201,7 @@ export const EditorPage: React.FC = () => {
         formViewportRef.current.scrollTo({ top: 0, behavior: 'smooth' });
       }
     },
-    [documentMode]
+    [documentMode, isDedicatedCoverLetter]
   );
 
   // Drag handle resize listener for 3-zone split
@@ -556,7 +595,7 @@ export const EditorPage: React.FC = () => {
         <div className="flex-1 flex overflow-hidden h-[calc(100vh-4rem)] pb-14 lg:pb-0">
           {/* ZONE 1: Narrow Left Section Rail (Desktop) */}
           <aside className="hidden lg:flex flex-col items-center py-3 px-2 gap-1.5 border-r border-[var(--border)] bg-[var(--surface)] w-[88px] shrink-0 overflow-y-auto">
-            {SECTION_RAIL_ITEMS.map((item) => {
+            {visibleRailItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeSection === item.id;
               const secState = completeness?.sectionStatus[item.id];
@@ -617,7 +656,7 @@ export const EditorPage: React.FC = () => {
             {/* Mobile & Tablet Horizontal Section Selector */}
             <div className="lg:hidden px-3 py-2 bg-[var(--surface)] border-b border-[var(--border)] overflow-x-auto">
               <div className="flex items-center gap-1.5 min-w-max">
-                {SECTION_RAIL_ITEMS.map((tab) => {
+                {visibleRailItems.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeSection === tab.id;
                   const secState = completeness?.sectionStatus[tab.id];

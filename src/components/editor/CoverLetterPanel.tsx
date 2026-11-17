@@ -5,13 +5,18 @@ import {
   CheckCircle2,
   FileText,
   Mail,
+  Paperclip,
   Plus,
   RotateCcw,
   Trash2,
 } from 'lucide-react';
-import React from 'react';
+import React, { useState } from 'react';
 import { toast } from 'sonner';
-import type { CVData, DocumentMode } from '../../shared/schema';
+import {
+  type CVData,
+  type DocumentMode,
+  isCoverLetterTemplatePreset,
+} from '../../shared/schema';
 import { createDefaultCoverLetter } from '../../shared/templates';
 import {
   Badge,
@@ -71,6 +76,32 @@ const COVER_LETTER_PRESETS = {
       closing:
         'Terlampir CV Akademik lengkap beserta daftar publikasi saya. Besar harapan saya untuk dapat mendiskusikan kontribusi riset yang dapat saya jalankan di laboratorium Bapak/Ibu. Terima kasih atas perhatiannya.',
     },
+    {
+      id: 'moderncv_dosen',
+      label: 'Cover Letter #1 — Dosen & Pengajar (ID)',
+      subject:
+        'Lamaran untuk Posisi Dosen Tamu (Aplikasi Komputer) di Program Studi Pendidikan Matematika Fakultas Keguruan dan Ilmu Pendidikan Universitas Sriwijaya',
+      opening:
+        'Sehubungan dengan informasi pembukaan rekrutmen **Dosen Tamu (Aplikasi Komputer)** di Program Studi Pendidikan Matematika, Fakultas Keguruan dan Ilmu Pendidikan, Universitas Sriwijaya, bersama surat ini saya bermaksud mengajukan diri untuk mengisi posisi tersebut.',
+      body: [
+        'Saya telah menyelesaikan studi **Magister Ilmu Komputer (M.Kom.)** di Fakultas Ilmu Komputer Universitas Sriwijaya pada Oktober 2024 dengan konsentrasi penelitian di bidang *Artificial Intelligence*, *Machine Learning*, dan *Deep Learning*. Selama menempuh pendidikan Sarjana dan Magister, saya secara konsisten mendalami pengembangan perangkat lunak, algoritma pemrograman, dan pengolahan citra medis serta memiliki komitmen tinggi terhadap dunia pengajaran dan pembimbingan mahasiswa.',
+        '• **Asisten Laboratorium & Pengajar Praktikum**: Berpengalaman membimbing mahasiswa dalam mata kuliah Pemrograman Dasar, Struktur Data, serta Aplikasi Komputer dan Pengolahan Data Ilmiah.\n• **Publikasi & Riset Terapan**: Memiliki rekam jejak publikasi ilmiah pada jurnal nasional terakreditasi dan konferensi internasional IEEE di bidang kecerdasan buatan dan komputasi terapan.\n• **Penguasaan Perangkat Lunak Akademik & Pemrograman**: Menguasai pengajaran paket aplikasi perkantoran akademik, LaTeX, Python, MATLAB, SPSS, serta pembuatan modul pembelajaran interaktif berbasis proyek.\n• **Dedikasi Tridharma Perguruan Tinggi**: Siap berkontribusi penuh dalam kegiatan pengajaran, pembimbingan praktikum mahasiswa Pendidikan Matematika, penelitian kolaboratif lintas jurusan, dan pengabdian kepada masyarakat.',
+      ],
+      closing:
+        'Sebagai bahan pertimbangan Bapak/Ibu, bersama surat lamaran ini saya lampirkan daftar riwayat hidup (Curriculum Vitae), ijazah, transkrip akademik, serta dokumen pendukung lainnya. Besar harapan saya untuk diberikan kesempatan mengikuti tahapan seleksi dan wawancara lebih lanjut. Atas perhatian dan kesempatan yang Bapak/Ibu berikan, saya ucapkan terima kasih.',
+      enclosures: [
+        'Pasfoto Terbaru (Latar Belakang Merah)',
+        'Kartu Tanda Penduduk (KTP)',
+        'Daftar Riwayat Hidup (Curriculum Vitae)',
+        'Ijazah S1 & S2 (Legalisir)',
+        'Transkrip Akademik S1 & S2 (Legalisir)',
+        'Sertifikat Kemampuan Bahasa Inggris (TOEFL / USEPT)',
+        'Sertifikat Pelatihan & Kompetensi Pendukung',
+        'Bukti Publikasi Artikel Ilmiah Terindeks',
+        'Surat Keterangan Sehat Jasmani & Rohani',
+        'Surat Pernyataan Kesediaan Mengajar',
+      ],
+    },
   ],
   en: [
     {
@@ -122,6 +153,8 @@ export const CoverLetterPanel: React.FC<CoverLetterPanelProps> = ({
   updateCV,
 }) => {
   const isId = cv.settings.cvLanguage === 'id';
+  const isDedicatedCoverLetter = isCoverLetterTemplatePreset(cv.settings.templatePreset);
+  const [newEnclosure, setNewEnclosure] = useState('');
 
   // Ensure coverLetter object is initialized with fallback if empty
   const rawCl = cv.coverLetter;
@@ -142,12 +175,20 @@ export const CoverLetterPanel: React.FC<CoverLetterPanelProps> = ({
     ) {
       draft.coverLetter = createDefaultCoverLetter(draft);
     }
+    if (!Array.isArray(draft.coverLetter.enclosures)) {
+      draft.coverLetter.enclosures = [];
+    }
+    if (typeof draft.coverLetter.postscript !== 'string') {
+      draft.coverLetter.postscript = '';
+    }
     return draft.coverLetter;
   };
 
   const applyPreset = (presetId: string) => {
     const list = isId ? COVER_LETTER_PRESETS.id : COVER_LETTER_PRESETS.en;
-    const found = list.find((p) => p.id === presetId);
+    const found = list.find((p) => p.id === presetId) as
+      | ((typeof list)[number] & { enclosures?: string[] })
+      | undefined;
     if (!found) return;
 
     updateCV((d) => {
@@ -156,6 +197,9 @@ export const CoverLetterPanel: React.FC<CoverLetterPanelProps> = ({
       target.openingParagraph = found.opening;
       target.bodyParagraphs = [...found.body];
       target.closingParagraph = found.closing;
+      if (found.enclosures) {
+        target.enclosures = [...found.enclosures];
+      }
       return d;
     });
 
@@ -197,45 +241,57 @@ export const CoverLetterPanel: React.FC<CoverLetterPanelProps> = ({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-bold font-heading">
-                Harvard OCS Cover Letter Builder
+                {cv.settings.templatePreset === 'cover_letter_1'
+                  ? 'Cover Letter #1 — ModernCV Classic + Lampiran (Bahasa Indonesia)'
+                  : cv.settings.templatePreset === 'simple_letter'
+                    ? 'Simple Letter — Overleaf Standard Letter + P.S.'
+                    : 'Harvard OCS Cover Letter Builder'}
               </h2>
               <span className="text-xs text-[var(--muted-foreground)] font-heading tabular-nums">
                 · {wordCount} kata
               </span>
             </div>
             <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-              Menggunakan header nama, kontak, dan tipografi LaTeX yang 100% serasi dengan Resume Anda.
+              {isDedicatedCoverLetter
+                ? 'Dokumen ini menggunakan template khusus Cover Letter Overleaf (.tex). Seluruh perubahan otomatis dirender ke PDF.'
+                : 'Menggunakan header nama, kontak, dan tipografi LaTeX yang 100% serasi dengan Resume Anda.'}
             </p>
           </div>
         </div>
 
-        {/* Document Preview Output Switcher */}
-        <div className="flex items-center gap-1 p-1 rounded-[12px] bg-[var(--surface)] border border-[var(--border-strong)] shrink-0">
-          <button
-            type="button"
-            onClick={() => onChangeDocumentMode('cover-letter')}
-            className={cn(
-              'px-2.5 py-1.5 rounded-[8px] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap',
-              documentMode === 'cover-letter'
-                ? 'bg-[#B8A9F5] text-[#2A2150]'
-                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-            )}
-          >
-            Preview Surat
-          </button>
-          <button
-            type="button"
-            onClick={() => onChangeDocumentMode('combined')}
-            className={cn(
-              'px-2.5 py-1.5 rounded-[8px] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap',
-              documentMode === 'combined'
-                ? 'bg-[#B8A9F5] text-[#2A2150]'
-                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-            )}
-          >
-            Gabungan (Surat + CV)
-          </button>
-        </div>
+        {/* Document Preview Output Switcher: hidden when dedicated cover letter preset is chosen */}
+        {isDedicatedCoverLetter ? (
+          <Badge variant="mint" className="shrink-0">
+            Template Khusus Cover Letter Aktif
+          </Badge>
+        ) : (
+          <div className="flex items-center gap-1 p-1 rounded-[12px] bg-[var(--surface)] border border-[var(--border-strong)] shrink-0">
+            <button
+              type="button"
+              onClick={() => onChangeDocumentMode('cover-letter')}
+              className={cn(
+                'px-2.5 py-1.5 rounded-[8px] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap',
+                documentMode === 'cover-letter'
+                  ? 'bg-[#B8A9F5] text-[#2A2150]'
+                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+              )}
+            >
+              Preview Surat
+            </button>
+            <button
+              type="button"
+              onClick={() => onChangeDocumentMode('combined')}
+              className={cn(
+                'px-2.5 py-1.5 rounded-[8px] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap',
+                documentMode === 'combined'
+                  ? 'bg-[#B8A9F5] text-[#2A2150]'
+                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+              )}
+            >
+              Gabungan (Surat + CV)
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 1-Click Harvard OCS Cover Letter Templates */}
@@ -255,7 +311,7 @@ export const CoverLetterPanel: React.FC<CoverLetterPanelProps> = ({
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
           {presets.map((preset) => (
             <button
               key={preset.id}
@@ -583,9 +639,111 @@ export const CoverLetterPanel: React.FC<CoverLetterPanelProps> = ({
               />
             </div>
             <div>
-              <Label>Nama Penanda Tangan (Otomatis dari Header CV)</Label>
+              <Label>Nama Penanda Tangan (Otomatis dari Header Pengirim)</Label>
               <Input value={cv.personalInfo.fullName} disabled className="opacity-75" />
             </div>
+          </div>
+
+          {/* Postscript / P.S. (Used in Simple Letter & Optional in Others) */}
+          <div className="pt-2 border-t border-[var(--border)]">
+            <Label htmlFor="cl-ps">
+              Catatan Tambahan / Postscript (P.S.) — Digunakan pada Simple Letter Overleaf
+            </Label>
+            <Input
+              id="cl-ps"
+              value={cl.postscript || ''}
+              onChange={(e) =>
+                updateCV((d) => {
+                  const target = ensureInitialized(d);
+                  target.postscript = e.target.value;
+                  return d;
+                })
+              }
+              placeholder="Contoh: P.S. Portofolio lengkap dan kode sumber dapat diakses melalui tautan di atas."
+            />
+          </div>
+
+          {/* Enclosures / Lampiran Berkas (Used in Cover Letter #1 ModernCV & Optional in Others) */}
+          <div className="pt-3 border-t border-[var(--border)] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Paperclip className="w-4 h-4 text-[#9B86EC]" strokeWidth={2.5} />
+                <div>
+                  <Label className="mb-0">
+                    Daftar Lampiran Berkas (\enclosure — Cover Letter #1 ModernCV)
+                  </Label>
+                  <p className="text-[11px] text-[var(--muted-foreground)]">
+                    Daftar dokumen/sertifikat terlampir yang dirender di bagian bawah surat lamaran.
+                  </p>
+                </div>
+              </div>
+              <Badge variant="lavender">{(cl.enclosures || []).length} Lampiran</Badge>
+            </div>
+
+            <div className="flex gap-2">
+              <Input
+                value={newEnclosure}
+                onChange={(e) => setNewEnclosure(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newEnclosure.trim()) {
+                    e.preventDefault();
+                    const val = newEnclosure.trim();
+                    updateCV((d) => {
+                      const target = ensureInitialized(d);
+                      target.enclosures.push(val);
+                      return d;
+                    });
+                    setNewEnclosure('');
+                  }
+                }}
+                placeholder="Tambah item lampiran (mis. Ijazah & Transkrip Akademik S1/S2)..."
+              />
+              <Button
+                type="button"
+                variant="soft"
+                onClick={() => {
+                  if (!newEnclosure.trim()) return;
+                  const val = newEnclosure.trim();
+                  updateCV((d) => {
+                    const target = ensureInitialized(d);
+                    target.enclosures.push(val);
+                    return d;
+                  });
+                  setNewEnclosure('');
+                }}
+              >
+                <Plus className="w-4 h-4" strokeWidth={2.5} />
+                <span>Tambah</span>
+              </Button>
+            </div>
+
+            {(cl.enclosures || []).length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {(cl.enclosures || []).map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[var(--background)] border border-[var(--border)] text-xs"
+                  >
+                    <span className="truncate">
+                      <strong>{idx + 1}.</strong> {item}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateCV((d) => {
+                          const target = ensureInitialized(d);
+                          target.enclosures.splice(idx, 1);
+                          return d;
+                        })
+                      }
+                      className="text-[var(--muted-foreground)] hover:text-red-600 cursor-pointer shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" strokeWidth={2.5} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

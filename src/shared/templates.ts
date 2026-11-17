@@ -1,7 +1,23 @@
-import { type CVData, DEFAULT_SECTION_ORDER } from './schema';
+import {
+  type CVData,
+  DEFAULT_SECTION_ORDER,
+  type HarvardLayoutSettings,
+  type TemplatePreset,
+} from './schema';
+
+export type SampleCreationMode =
+  | 'blank'
+  | 'sample-id'
+  | 'sample-en'
+  | 'sample-academic'
+  | 'sample-jakes'
+  | 'sample-cover-letter-1'
+  | 'sample-simple-letter';
 
 export interface TemplatePresetMeta {
-  id: 'classic' | 'compact' | 'academic';
+  id: TemplatePreset;
+  category: 'harvard' | 'overleaf' | 'cover-letter';
+  documentType: 'cv' | 'cover-letter';
   nameId: string;
   nameEn: string;
   badgeId: string;
@@ -12,11 +28,17 @@ export interface TemplatePresetMeta {
   bestForEn: string;
   accentColor: string;
   sampleLang: 'id' | 'en';
+  sampleMode: SampleCreationMode;
+  latexMacros: string[];
+  recommendedSettings: Partial<HarvardLayoutSettings>;
+  previewHeaderRule: 'none' | 'single' | 'double';
 }
 
 export const TEMPLATE_PRESETS: TemplatePresetMeta[] = [
   {
     id: 'classic',
+    category: 'harvard',
+    documentType: 'cv',
     nameId: 'Harvard OCS Classic',
     nameEn: 'Harvard OCS Classic',
     badgeId: 'Standar Emas Korporat',
@@ -25,13 +47,26 @@ export const TEMPLATE_PRESETS: TemplatePresetMeta[] = [
       'Format resmi Harvard Office of Career Services (OCS) dengan tipografi serif TeX Gyre Termes 11pt, small-caps header, dan hirarki dua baris yang sangat disukai rekruter MBB, perbankan, dan Big Tech.',
     descEn:
       'Official Harvard Office of Career Services (OCS) layout featuring 11pt TeX Gyre Termes serif typography, small-caps section headers, and crisp two-line entry hierarchy favored by MBB, finance, and Big Tech.',
-    bestForId: 'Management Consulting, Finance, Software Engineering, Fresh Graduate',
-    bestForEn: 'Management Consulting, Finance, Software Engineering, Recent Graduates',
+    bestForId: 'Management Consulting, Corporate, Software Engineering, Fresh Graduate',
+    bestForEn: 'Management Consulting, Corporate, Software Engineering, Recent Graduates',
     accentColor: '#B8A9F5',
     sampleLang: 'id',
+    sampleMode: 'sample-id',
+    latexMacros: ['tgtermes', '\\scshape\\bfseries', '\\titlerule'],
+    recommendedSettings: {
+      templatePreset: 'classic',
+      fontFamily: 'tgtermes',
+      fontSize: '11pt',
+      margin: 'normal',
+      sectionSpacing: 'normal',
+      showLinksIcon: false,
+    },
+    previewHeaderRule: 'none',
   },
   {
     id: 'compact',
+    category: 'harvard',
+    documentType: 'cv',
     nameId: 'Harvard High-Density 1-Page',
     nameEn: 'Harvard High-Density 1-Page',
     badgeId: 'Maksimal 1 Halaman',
@@ -44,9 +79,22 @@ export const TEMPLATE_PRESETS: TemplatePresetMeta[] = [
     bestForId: 'Senior Engineer, Product Manager, Data Scientist, Career Switcher',
     bestForEn: 'Senior Engineers, Product Managers, Data Scientists, Career Switchers',
     sampleLang: 'en',
+    sampleMode: 'sample-en',
+    latexMacros: ['libertinus', 'margin=0.52in', 'itemsep=0.5pt'],
+    recommendedSettings: {
+      templatePreset: 'compact',
+      fontFamily: 'libertinus',
+      fontSize: '10.5pt',
+      margin: 'narrow',
+      sectionSpacing: 'compact',
+      showLinksIcon: false,
+    },
+    previewHeaderRule: 'none',
   },
   {
     id: 'academic',
+    category: 'harvard',
+    documentType: 'cv',
     nameId: 'Harvard Academic & Research CV',
     nameEn: 'Harvard Academic & Research CV',
     badgeId: 'Riset & Beasiswa',
@@ -59,6 +107,162 @@ export const TEMPLATE_PRESETS: TemplatePresetMeta[] = [
     bestForId: 'Pendaftar S2/S3, LPDP/Chevening/Fulbright, Dosen, Peneliti R&D',
     bestForEn: 'Master/PhD Applicants, Fellowship Candidates, Researchers, Faculty',
     sampleLang: 'id',
+    sampleMode: 'sample-academic',
+    latexMacros: ['ebgaramond', '\\LARGE\\scshape', 'Publications'],
+    recommendedSettings: {
+      templatePreset: 'academic',
+      fontFamily: 'ebgaramond',
+      fontSize: '11pt',
+      margin: 'normal',
+      sectionSpacing: 'normal',
+      showLinksIcon: false,
+    },
+    previewHeaderRule: 'none',
+  },
+  {
+    id: 'jakes',
+    category: 'overleaf',
+    documentType: 'cv',
+    nameId: "Jake's Resume — Overleaf SWE (sb2nov)",
+    nameEn: "Jake's Resume — Overleaf SWE (sb2nov)",
+    badgeId: 'Overleaf .tex · Tech #1',
+    badgeEn: 'Overleaf #1 SWE Template',
+    descId:
+      'Integrasi langsung dari file jake_s_resume.tex (Jake Gutierrez / sb2nov). Menggunakan pemisah kontak vertikal ($|$), tautan bergaris bawah, format \\resumeProjectHeading (Nama Proyek | Tech Stack), dan margin rapat 0.45in.',
+    descEn:
+      'Direct integration of jake_s_resume.tex (Jake Gutierrez / sb2nov) featuring pipe-separated underlined contact links, \\resumeSubheading, and \\resumeProjectHeading.',
+    accentColor: '#FFD3B6',
+    bestForId: 'Software Engineer, Computer Science, Full-Stack/Backend, AI/ML Researcher',
+    bestForEn: 'Software Engineers, CS Students, Full-Stack/Backend, AI/ML Researchers',
+    sampleLang: 'en',
+    sampleMode: 'sample-jakes',
+    latexMacros: ['\\resumeSubheading', '\\resumeProjectHeading', '$|$ underlined links'],
+    recommendedSettings: {
+      templatePreset: 'jakes',
+      paperSize: 'letter',
+      fontFamily: 'tgtermes',
+      fontSize: '10.5pt',
+      margin: 'compact',
+      sectionSpacing: 'compact',
+      showLinksIcon: false,
+      cvLanguage: 'en',
+    },
+    previewHeaderRule: 'none',
+  },
+  {
+    id: 'cover_letter_1',
+    category: 'cover-letter',
+    documentType: 'cover-letter',
+    nameId: 'Cover Letter #1 — ModernCV Classic + Lampiran (ID)',
+    nameEn: 'Cover Letter #1 — ModernCV Classic + Enclosure (ID)',
+    badgeId: 'Overleaf .tex · Surat Lamaran ID',
+    badgeEn: 'Overleaf .tex · Cover Letter ID',
+    descId:
+      'Adaptasi langsung dari file cover_letter_1.tex (gaya ModernCV Classic — Dita Dwi Auliani) dalam Bahasa Indonesia. Dilengkapi blok Daftar Lampiran (Transkrip/Sertifikat/Berkas), Perihal tebal, dan poin-poin pengalaman mengajar/kerja.',
+    descEn:
+      'Adapted from cover_letter_1.tex (ModernCV Classic style — Dita Dwi Auliani) in formal Indonesian, featuring an itemized Enclosure (Lampiran) header block, bold Subject line, and bulleted experience.',
+    accentColor: '#BFEBD7',
+    bestForId: 'Lamaran Dosen/Akademisi, CPNS/BUMN, Korporat Formal, Beasiswa (Dengan Lampiran)',
+    bestForEn: 'Lecturer/Faculty Applications, Formal Corporate, Government & Fellowships',
+    sampleLang: 'id',
+    sampleMode: 'sample-cover-letter-1',
+    latexMacros: ['moderncv classic', '\\enclosure[Lampiran]', '\\makelettertitle'],
+    recommendedSettings: {
+      templatePreset: 'cover_letter_1',
+      paperSize: 'a4',
+      fontFamily: 'tgtermes',
+      fontSize: '11pt',
+      margin: 'normal',
+      sectionSpacing: 'normal',
+      cvLanguage: 'id',
+    },
+    previewHeaderRule: 'single',
+  },
+  {
+    id: 'simple_letter',
+    category: 'cover-letter',
+    documentType: 'cover-letter',
+    nameId: 'Simple Letter — Overleaf Standard Letter + P.S.',
+    nameEn: 'Simple Letter — Overleaf Standard Letter + P.S.',
+    badgeId: 'Overleaf .tex · Surat Formal',
+    badgeEn: 'Overleaf .tex · Standard Letter',
+    descId:
+      'Adaptasi langsung dari file simple_letter.tex (\\documentclass[a4paper]{letter}). Menampilkan blok alamat pengirim di kanan atas, alamat tujuan di kiri, paragraf surat formal bersih, salam penutup, dan baris P.S. (Postscript).',
+    descEn:
+      'Direct adaptation of simple_letter.tex (\\documentclass[a4paper]{letter}) with top-right sender return address, recipient address block, clean formal paragraphs, signature, and P.S. postscript.',
+    accentColor: '#BDE0FE',
+    bestForId: 'Surat Pengantar Lamaran Kerja, Surat Rekomendasi, Korespondensi Resmi Eksekutif',
+    bestForEn: 'Job Application Cover Letters, Executive Correspondence, Formal Letters',
+    sampleLang: 'id',
+    sampleMode: 'sample-simple-letter',
+    latexMacros: ['\\documentclass{letter}', '\\longindentation=0pt', '\\ps Postscript'],
+    recommendedSettings: {
+      templatePreset: 'simple_letter',
+      paperSize: 'a4',
+      fontFamily: 'tgtermes',
+      fontSize: '11pt',
+      margin: 'normal',
+      sectionSpacing: 'normal',
+      cvLanguage: 'id',
+    },
+    previewHeaderRule: 'none',
+  },
+  {
+    id: 'wharton',
+    category: 'overleaf',
+    documentType: 'cv',
+    nameId: 'Wharton & Wall Street M&A Finance',
+    nameEn: 'Wharton & Wall Street M&A Finance',
+    badgeId: 'Overleaf Finance · Padat',
+    badgeEn: 'Investment Banking & PE',
+    descId:
+      'Gaya resume LaTeX standar Wharton & Wall Street dengan garis pembatas penuh di bawah kop kontak, penulisan tanggal singkat, dan kepadatan tinggi untuk menonjolkan nilai transaksi & dampak finansial.',
+    descEn:
+      'Wharton & Wall Street M&A LaTeX layout featuring a full horizontal rule beneath the header contact block and high-density bullet formatting for deal metrics.',
+    accentColor: '#FFF1B8',
+    bestForId: 'Investment Banking, Private Equity, Corporate Finance, Analis Bisnis',
+    bestForEn: 'Investment Banking, Private Equity, Corporate Finance, Business Analysts',
+    sampleLang: 'en',
+    sampleMode: 'sample-en',
+    latexMacros: ['tgtermes 10pt', '\\hrule height 0.6pt', 'Compact Deal List'],
+    recommendedSettings: {
+      templatePreset: 'wharton',
+      fontFamily: 'tgtermes',
+      fontSize: '10pt',
+      margin: 'narrow',
+      sectionSpacing: 'compact',
+      dateFormat: 'short',
+      showLinksIcon: false,
+    },
+    previewHeaderRule: 'single',
+  },
+  {
+    id: 'mckinsey',
+    category: 'overleaf',
+    documentType: 'cv',
+    nameId: 'McKinsey & Executive Double-Rule',
+    nameEn: 'McKinsey & Executive Double-Rule',
+    badgeId: 'Overleaf Executive · MBB',
+    badgeEn: 'Executive Consulting Style',
+    descId:
+      'Modifikasi template LaTeX eksekutif dengan aksen garis ganda (thick-thin rule) di bawah kop nama serta tipografi Libertinus 10.5pt yang tegas untuk peran kepemimpinan & konsultan manajemen.',
+    descEn:
+      'Modified executive LaTeX template with a classic thick-thin double rule under the header and sharp 10.5pt Libertinus serif typography for strategy & leadership.',
+    accentColor: '#FFC8DD',
+    bestForId: 'Management Consultant (MBB), Product Lead, Manajer Operasional, Eksekutif',
+    bestForEn: 'Management Consultants (MBB), Product Leads, Operations Managers, Executives',
+    sampleLang: 'en',
+    sampleMode: 'sample-en',
+    latexMacros: ['libertinus 10.5pt', '\\hrule 0.9pt + 0.4pt', 'Executive Header'],
+    recommendedSettings: {
+      templatePreset: 'mckinsey',
+      fontFamily: 'libertinus',
+      fontSize: '10.5pt',
+      margin: 'narrow',
+      sectionSpacing: 'normal',
+      showLinksIcon: false,
+    },
+    previewHeaderRule: 'double',
   },
 ];
 
@@ -250,6 +454,8 @@ export function createSampleCVIndonesian(id = 'sample-harvard-id'): CVData {
       closingParagraph:
         'Saya sangat menghargai kesempatan untuk mendiskusikan bagaimana pengalaman saya dalam rekayasa sistem terdistribusi dan reliabilitas pembayaran dapat mendukung target ekspansi teknis tim Anda. Terima kasih atas waktu dan pertimbangan Bapak/Ibu.',
       signOff: 'Hormat saya,',
+      enclosures: [],
+      postscript: '',
     },
     sectionOrder: DEFAULT_SECTION_ORDER.map((item) =>
       item.key === 'publications' ? { ...item, visible: true } : item
@@ -414,6 +620,8 @@ export function createSampleCVEnglish(id = 'sample-harvard-en'): CVData {
       closingParagraph:
         'I would welcome the opportunity to discuss how my background in cross-border payment orchestration and AI-assisted merchant growth can accelerate Stripe’s global roadmap. Thank you for your time and consideration.',
       signOff: 'Sincerely,',
+      enclosures: [],
+      postscript: '',
     },
     sectionOrder: DEFAULT_SECTION_ORDER,
     settings: {
@@ -454,13 +662,14 @@ export function createSampleCVAcademic(id = 'sample-harvard-academic'): CVData {
 export function createDefaultCoverLetter(cv: CVData) {
   const isId = cv.settings.cvLanguage === 'id';
   const role = cv.personalInfo.headline || (isId ? 'Posisi Profesional' : 'Target Role');
-  const firstCompany = cv.experience[0]?.company || (isId ? 'Perusahaan Sebelumnya' : 'Previous Organization');
+  const firstCompany =
+    cv.experience[0]?.company || (isId ? 'Perusahaan Sebelumnya' : 'Previous Organization');
   const firstEdu = cv.education[0]?.institution || (isId ? 'Universitas' : 'University');
 
   if (isId) {
     return {
       enabled: true,
-      date: '16 November 2026',
+      date: '17 November 2026',
       recipientName: 'Tim Rekrutmen & Akuisisi Talenta',
       recipientTitle: 'Divisi Sumber Daya Manusia',
       companyName: 'Nama Perusahaan Tujuan',
@@ -475,12 +684,19 @@ export function createDefaultCoverLetter(cv: CVData) {
       closingParagraph:
         'Sebagai bahan pertimbangan, bersama surat ini saya lampirkan Resume/CV standar Harvard OCS saya. Saya sangat mengharapkan kesempatan wawancara untuk mendiskusikan lebih lanjut bagaimana kualifikasi saya dapat mendukung target tim Bapak/Ibu. Terima kasih atas waktu dan perhatiannya.',
       signOff: 'Hormat saya,',
+      enclosures: [
+        '1. Ijazah & Transkrip Nilai Akademik',
+        '2. Curriculum Vitae (CV) Terbaru',
+        '3. Sertifikat Kompetensi & Pelatihan',
+        '4. Portofolio & Dokumen Pendukung',
+      ],
+      postscript: '',
     };
   }
 
   return {
     enabled: true,
-    date: 'November 16, 2026',
+    date: 'November 17, 2026',
     recipientName: 'Hiring Committee',
     recipientTitle: 'Talent Acquisition Team',
     companyName: 'Target Company Name',
@@ -495,6 +711,12 @@ export function createDefaultCoverLetter(cv: CVData) {
     closingParagraph:
       'Enclosed is my resume detailing my qualifications and achievements. I would welcome the opportunity to discuss how my background aligns with your team’s needs. Thank you very much for your time and consideration.',
     signOff: 'Sincerely,',
+    enclosures: [
+      '1. Academic Transcripts & Degree Certificates',
+      '2. Updated Curriculum Vitae (Resume)',
+      '3. Professional Certifications',
+    ],
+    postscript: '',
   };
 }
 
@@ -594,6 +816,8 @@ export function createBlankCV(id: string, lang: 'id' | 'en' = 'id'): CVData {
       bodyParagraphs: [],
       closingParagraph: '',
       signOff: '',
+      enclosures: [],
+      postscript: '',
     },
     sectionOrder: DEFAULT_SECTION_ORDER,
     settings: {
@@ -611,4 +835,327 @@ export function createBlankCV(id: string, lang: 'id' | 'en' = 'id'): CVData {
   base.coverLetter = createDefaultCoverLetter(base);
   return base;
 }
+
+/**
+ * Sample 4: Jake's Resume (Direct adaptation of attached jake_s_resume.tex by Jake Gutierrez / sb2nov)
+ */
+export function createSampleJakesResume(id = 'sample-jakes-resume'): CVData {
+  const now = new Date().toISOString();
+  const cv: CVData = {
+    id,
+    title: "Jake Ryan — Software Engineer (Jake's Resume Overleaf)",
+    createdAt: now,
+    updatedAt: now,
+    exportCount: 1,
+    personalInfo: {
+      fullName: 'Jake Ryan',
+      headline: '',
+      email: 'jake@su.edu',
+      phone: '123-456-7890',
+      location: 'Georgetown, TX',
+      linkedin: 'linkedin.com/in/jake',
+      github: 'github.com/jake',
+      portfolio: '',
+      customLinks: [],
+    },
+    summary: {
+      content: '',
+    },
+    education: [
+      {
+        id: 'jakes-edu-1',
+        institution: 'Southwestern University',
+        location: 'Georgetown, TX',
+        degree: 'Bachelor of Arts in Computer Science',
+        fieldOfStudy: 'Minor in Business',
+        startDate: '2018-08',
+        endDate: '2021-05',
+        isCurrent: false,
+        gpa: '',
+        honors: '',
+        coursework: '',
+        thesis: '',
+        bullets: [],
+      },
+      {
+        id: 'jakes-edu-2',
+        institution: 'Blinn College',
+        location: 'Bryan, TX',
+        degree: "Associate's in Liberal Arts",
+        fieldOfStudy: '',
+        startDate: '2014-08',
+        endDate: '2018-05',
+        isCurrent: false,
+        gpa: '',
+        honors: '',
+        coursework: '',
+        thesis: '',
+        bullets: [],
+      },
+    ],
+    experience: [
+      {
+        id: 'jakes-exp-1',
+        company: 'Texas A&M University',
+        location: 'College Station, TX',
+        position: 'Undergraduate Research Assistant',
+        startDate: '2020-06',
+        endDate: '',
+        isCurrent: true,
+        bullets: [
+          'Developed a REST API using **FastAPI** and **PostgreSQL** to store data from learning management systems.',
+          'Developed a full-stack web application using **Flask, React, PostgreSQL and Docker** to analyze GitHub data.',
+          'Explored ways to visualize GitHub collaboration in a classroom setting.',
+        ],
+      },
+      {
+        id: 'jakes-exp-2',
+        company: 'Southwestern University',
+        location: 'Georgetown, TX',
+        position: 'Information Technology Support Specialist',
+        startDate: '2018-09',
+        endDate: '',
+        isCurrent: true,
+        bullets: [
+          'Communicate with managers to set up campus computers used on campus.',
+          'Assess and troubleshoot computer problems brought by students, faculty and staff.',
+          'Maintain upkeep of computers, classroom equipment, and **200 printers** across campus.',
+        ],
+      },
+      {
+        id: 'jakes-exp-3',
+        company: 'Southwestern University',
+        location: 'Georgetown, TX',
+        position: 'Artificial Intelligence Research Assistant',
+        startDate: '2019-05',
+        endDate: '2019-07',
+        isCurrent: false,
+        bullets: [
+          'Explored methods to generate video game dungeons based off of *The Legend of Zelda*.',
+          'Developed a game in **Java** to test the generated dungeons and contributed **50K+ lines of code** via Git.',
+          'Conducted a human subject study to determine which video game dungeon generation technique is enjoyable.',
+          'Wrote an 8-page paper and presented virtually to the **World Conference on Computational Intelligence**.',
+        ],
+      },
+    ],
+    leadership: [],
+    projects: [
+      {
+        id: 'jakes-proj-1',
+        name: 'Gitlytics',
+        techStack: 'Python, Flask, React, PostgreSQL, Docker',
+        link: 'github.com/jake/gitlytics',
+        startDate: '2020-06',
+        endDate: 'Present',
+        bullets: [
+          'Developed a full-stack web application using Flask serving a REST API with React as the frontend.',
+          'Implemented GitHub OAuth to get data from user repositories and visualized GitHub collaboration.',
+          'Used **Celery and Redis** for asynchronous tasks.',
+        ],
+      },
+      {
+        id: 'jakes-proj-2',
+        name: 'Simple Paintball',
+        techStack: 'Spigot API, Java, Maven, TravisCI, Git',
+        link: 'github.com/jake/simple-paintball',
+        startDate: '2018-05',
+        endDate: '2020-05',
+        bullets: [
+          'Developed a Minecraft server plugin to entertain kids during free time for a previous job.',
+          'Published plugin to websites gaining **2K+ downloads** and an average **4.5/5-star review**.',
+          'Implemented continuous delivery using TravisCI to build the plugin upon a new release.',
+        ],
+      },
+    ],
+    awards: [],
+    certifications: [],
+    publications: [],
+    skills: {
+      categories: [
+        {
+          id: 'jakes-sk-1',
+          category: 'Languages',
+          items: 'Java, Python, C/C++, SQL (Postgres), JavaScript, HTML/CSS, R',
+        },
+        {
+          id: 'jakes-sk-2',
+          category: 'Frameworks',
+          items: 'React, Node.js, Flask, JUnit, WordPress, Material-UI, FastAPI',
+        },
+        {
+          id: 'jakes-sk-3',
+          category: 'Developer Tools',
+          items: 'Git, Docker, TravisCI, Google Cloud Platform, VS Code, Visual Studio, PyCharm, IntelliJ, Eclipse',
+        },
+        {
+          id: 'jakes-sk-4',
+          category: 'Libraries',
+          items: 'pandas, NumPy, Matplotlib',
+        },
+      ],
+      languages: [],
+      interests: '',
+    },
+    customSections: [],
+    coverLetter: {
+      enabled: false,
+      date: 'November 17, 2026',
+      recipientName: 'Software Engineering Hiring Committee',
+      recipientTitle: 'Engineering Recruiting',
+      companyName: 'Tech Corp',
+      companyAddress: 'San Francisco, CA',
+      subjectLine: 'Application for Software Engineer',
+      salutation: 'Dear Hiring Manager,',
+      openingParagraph:
+        'I am writing to apply for the Software Engineer role. As a Computer Science undergraduate with full-stack and research experience, I am eager to contribute to your engineering team.',
+      bodyParagraphs: [
+        'I have developed full-stack web applications using Flask, React, PostgreSQL, and Docker, and explored methods to generate video game dungeons in Java.',
+      ],
+      closingParagraph:
+        'Thank you for your time and consideration. I look forward to speaking with you.',
+      signOff: 'Sincerely,',
+      enclosures: [],
+      postscript: '',
+    },
+    sectionOrder: [
+      { key: 'summary', visible: false },
+      { key: 'education', visible: true },
+      { key: 'experience', visible: true },
+      { key: 'projects', visible: true },
+      { key: 'skills', visible: true },
+      { key: 'leadership', visible: false },
+      { key: 'awards', visible: false },
+      { key: 'certifications', visible: false },
+      { key: 'publications', visible: false },
+      { key: 'custom', visible: false },
+    ],
+    settings: {
+      paperSize: 'letter',
+      fontSize: '10.5pt',
+      margin: 'compact',
+      sectionSpacing: 'compact',
+      fontFamily: 'tgtermes',
+      showLinksIcon: false,
+      dateFormat: 'short',
+      cvLanguage: 'en',
+      templatePreset: 'jakes',
+    },
+  };
+  cv.coverLetter = createDefaultCoverLetter(cv);
+  return cv;
+}
+
+/**
+ * Sample 5: Cover Letter #1 (Direct Indonesian adaptation of attached cover_letter_1.tex — Dita Dwi Auliani)
+ */
+export function createSampleCoverLetter1Indonesian(id = 'sample-cover-letter-1'): CVData {
+  const base = createBlankCV(id, 'id');
+  base.title = 'Dita Dwi Auliani — Cover Letter #1 (ModernCV Bahasa Indonesia)';
+  base.personalInfo = {
+    fullName: 'Dita Dwi Auliani',
+    headline: 'Dosen Tamu & Pengajar Ilmu Komputer (Aplikasi Komputer)',
+    email: 'dita.ars@gmail.com',
+    phone: '+62 812-3456-7890',
+    location: 'Jakarta Barat, DKI Jakarta, Indonesia',
+    linkedin: 'linkedin.com/in/ditadwiauliani',
+    github: '',
+    portfolio: '',
+    customLinks: [],
+  };
+  base.settings = {
+    ...base.settings,
+    templatePreset: 'cover_letter_1',
+    cvLanguage: 'id',
+    fontFamily: 'tgtermes',
+    fontSize: '11pt',
+    margin: 'normal',
+    sectionSpacing: 'normal',
+  };
+  base.coverLetter = {
+    enabled: true,
+    date: '17 November 2026',
+    recipientName: 'Ketua Program Studi / Dosen Penanggung Jawab',
+    recipientTitle: 'Departemen Aplikasi Komputer & Ilmu Komputer',
+    companyName: 'Universitas Indonesia',
+    companyAddress: 'Kampus Baru UI Depok, Jawa Barat, Indonesia',
+    subjectLine:
+      'Lamaran untuk Posisi Dosen Tamu (Aplikasi Komputer) dengan Referensi Pengumuman: XXXX/XX, Tertanggal 04-03-2026',
+    salutation: 'Dengan hormat,',
+    openingParagraph:
+      'Sehubungan dengan perihal yang tercantum di atas, saya **Dita Dwi Auliani**, bermaksud mengajukan permohonan lamaran untuk posisi Dosen Tamu tersebut. Saya memperoleh informasi mengenai pembukaan posisi ini melalui portal karir resmi dan pengumuman pada situs web universitas.',
+    bodyParagraphs: [
+      'Sebagai lulusan yang memiliki fondasi akademik kuat, saya siap mengampu dan menyusun materi perkuliahan pada mata kuliah **Pemrograman C, Struktur Data, Algoritma, Sistem Operasi, Elektronika Digital, Deep Learning & Jaringan Saraf Tiruan, Aplikasi Web, serta Rekayasa Perangkat Lunak**. Saya menerapkan pendekatan pengajaran yang komunikatif, sistematis, dan logis dalam memecahkan permasalahan mulai dari konsep dasar hingga solusi yang teroptimasi.',
+      'Saya memiliki pengalaman dalam bidang pengajaran dan pembimbingan akademik (*teaching & mentoring*) sebagaimana tercantum di bawah ini:\n• Sebagai **Asisten Dosen (Teaching Assistant)** selama menempuh program Magister (S2) Ilmu Komputer.\n• Sebagai **Mentor** pada program pengembangan kepemimpinan digital "Going Online As Leader (GOAL)" yang diselenggarakan bekerja sama dengan Kementerian (2020 – 2021).\n• Sebagai **Pengajar Privat** untuk mata kuliah Matematika Komputasi dan Ilmu Komputer.',
+      'Saya yakin bahwa kemampuan saya dalam mengelola kelas serta menjaga standar etika akademik yang tinggi sebagai pengajar akan memberikan manfaat nyata bagi institusi, serta berkontribusi positif terhadap pengembangan kompetensi mahasiswa.',
+    ],
+    closingParagraph:
+      'Besar harapan saya untuk diberikan kesempatan mengabdi sebagai Dosen Tamu pada Departemen Aplikasi Komputer dan dipertimbangkan untuk posisi tersebut. Atas waktu dan perhatian Bapak/Ibu, saya ucapkan terima kasih.',
+    signOff: 'Hormat saya,',
+    enclosures: [
+      '1. Ijazah & Transkrip Nilai SMA/Sederajat',
+      '2. Ijazah & Transkrip Nilai Diploma',
+      '3. Ijazah & Transkrip Nilai Sarjana (S1)',
+      '4. Ijazah & Transkrip Nilai Magister (S2)',
+      '5. Sertifikat Kompetensi Akademik (GATE)',
+      '6. Sertifikat Kelayakan Dosen (SLET)',
+      '7. Sertifikat Kualifikasi Nasional (NET)',
+      '8. Surat Keterangan Domisili / Administrasi',
+      '9. Bukti Identitas Resmi (KTP)',
+      '10. Curriculum Vitae (Resume Lengkap)',
+    ],
+    postscript: '',
+  };
+  return base;
+}
+
+/**
+ * Sample 6: Simple Formal Letter (Direct adaptation of attached simple_letter.tex)
+ */
+export function createSampleSimpleLetter(id = 'sample-simple-letter'): CVData {
+  const base = createBlankCV(id, 'id');
+  base.title = 'Simple Formal Letter — Surat Lamaran & Korespondensi Resmi';
+  base.personalInfo = {
+    fullName: 'Bagaskara Adi Pratama',
+    headline: 'Senior Software Engineer',
+    email: 'bagaskara.pratama@alumni.ui.ac.id',
+    phone: '+62 812-8890-4412',
+    location: 'Jl. Jenderal Sudirman Kav. 52-53, Jakarta Selatan 12190',
+    linkedin: 'linkedin.com/in/bagaskarapratama',
+    github: '',
+    portfolio: '',
+    customLinks: [],
+  };
+  base.settings = {
+    ...base.settings,
+    templatePreset: 'simple_letter',
+    cvLanguage: 'id',
+    fontFamily: 'tgtermes',
+    fontSize: '11pt',
+    margin: 'normal',
+    sectionSpacing: 'normal',
+  };
+  base.coverLetter = {
+    enabled: true,
+    date: '17 November 2026',
+    recipientName: 'Yth. Bapak/Ibu Pimpinan Rekrutmen',
+    recipientTitle: 'Divisi Engineering & Produk Digital',
+    companyName: 'PT GoTo Gojek Tokopedia Tbk',
+    companyAddress: 'Gedung Pasaraya Blok M, Jl. Iskandarsyah II No. 2, Jakarta Selatan',
+    subjectLine: 'Lamaran Posisi Principal Backend Engineer',
+    salutation: 'Dengan hormat,',
+    openingParagraph:
+      'Melalui surat resmi ini, saya menyampaikan ketertarikan untuk bergabung sebagai **Principal Backend Engineer** di PT GoTo Gojek Tokopedia Tbk. Selama lebih dari lima tahun terakhir, saya berfokus merancang dan mengelola arsitektur layanan pembayaran bervolume tinggi dengan tingkat ketersediaan 99,995% SLA.',
+    bodyParagraphs: [
+      'Dalam peran saya saat ini, saya memimpin tim rekayasa lintas fungsi untuk memodernisasi sistem buku besar (*core ledger*) dan memangkas latensi transaksi secara signifikan. Pengalaman ini membekali saya dengan pemahaman mendalam mengenai keandalan sistem terdistribusi, keamanan finansial, serta efisiensi biaya infrastruktur awan.',
+    ],
+    closingParagraph:
+      'Saya sangat menghargai kesempatan untuk berdiskusi lebih lanjut mengenai bagaimana pengalaman teknis dan kepemimpinan saya dapat mendukung peta jalan produk Bapak/Ibu. Terima kasih atas waktu dan pertimbangan yang diberikan.',
+    signOff: 'Terima kasih dan hormat saya,',
+    enclosures: [],
+    postscript:
+      'P.S. Portofolio arsitektur sistem dan kode sumber proyek terbuka saya dapat diakses langsung melalui github.com/bagaskara-dev.',
+  };
+  return base;
+}
+
 
