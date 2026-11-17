@@ -7,6 +7,10 @@ import {
   formatRichBulletLatex,
   sanitizeUrlLatex,
 } from '../server/latexEscape';
+import {
+  compileHarvardVectorPdf,
+  parseRichTextSpans,
+} from '../server/nativeHarvardPdfCompiler';
 import { analyzeBullet, calculateCVCompleteness } from '../shared/scoring';
 import { createSampleCVEnglish, createSampleCVIndonesian } from '../shared/templates';
 
@@ -107,4 +111,20 @@ describe('Harvard LaTeX Builder & Completeness Scoring', () => {
     expect(combinedRes.pdfBase64.length).toBeGreaterThan(1000);
     expect(combinedRes.pageCount).toBeGreaterThanOrEqual(2);
   }, 25000);
+
+  it('compiles Vercel serverless Harvard Vector PDF with Small-Caps, en-dash dates, and newline space preservation', async () => {
+    const spans = parseRichTextSpans('pedoman\nproyek dan **30%** peningkatan');
+    const joined = spans.map((s) => s.text).join('');
+    expect(joined).toBe('pedoman proyek dan 30% peningkatan');
+
+    const cvEn = createSampleCVEnglish('vercel-vector-en');
+    const vecResEn = await compileHarvardVectorPdf(cvEn, 'cv');
+    expect(vecResEn.pdfBase64.length).toBeGreaterThan(1000);
+    expect(vecResEn.pageCount).toBe(1);
+
+    const cvId = createSampleCVIndonesian('vercel-vector-id');
+    const vecResId = await compileHarvardVectorPdf(cvId, 'cv');
+    expect(vecResId.pdfBase64.length).toBeGreaterThan(1000);
+    expect(vecResId.pageCount).toBeGreaterThanOrEqual(1);
+  });
 });
