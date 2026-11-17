@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import path from 'path';
 import pino from 'pino';
 import { createServer as createViteServer } from 'vite';
-import { compileCVToPdf, detectLatexEngine } from './src/server/compiler';
+import { compileCVToPdf, detectLatexEngine, warmupLatexEngine } from './src/server/compiler';
 import { buildHarvardLatex } from './src/server/latexBuilder';
 import { containsForbiddenLatexCommands } from './src/server/latexEscape';
 import { CompileRequestSchema } from './src/shared/schema';
@@ -186,12 +186,19 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', async () => {
-    const engine = await detectLatexEngine();
-    logger.info(
-      { port: PORT, engine: engine.name, version: engine.version },
-      'Buat CV Kuy server started'
-    );
+  app.listen(PORT, '0.0.0.0', () => {
+    logger.info({ port: PORT }, 'Buat CV Kuy server listening on port 3000');
+    detectLatexEngine()
+      .then((engine) => {
+        logger.info({ engine: engine.name, version: engine.version }, 'LaTeX engine ready');
+        return warmupLatexEngine();
+      })
+      .then(() => {
+        logger.info('LaTeX bundle & format cache warmed up');
+      })
+      .catch((err) => {
+        logger.warn({ err }, 'LaTeX engine check warning');
+      });
   });
 }
 

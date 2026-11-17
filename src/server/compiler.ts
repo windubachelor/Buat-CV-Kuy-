@@ -18,11 +18,15 @@ interface CachedCompileResult {
 }
 
 const compileCache = new LRUCache<string, CachedCompileResult>({
-  max: 50,
-  ttl: 1000 * 60 * 30, // 30 minutes
+  max: 100,
+  ttl: 1000 * 60 * 60, // 60 minutes
 });
 
-const compileQueue = new PQueue({ concurrency: 3 });
+// Concurrency 1 prevents multiple Tectonic processes from contending on the XDG_CACHE_HOME bundle/format cache
+const compileQueue = new PQueue({ concurrency: 1 });
+
+// Deduplicate identical in-flight compilations
+const inFlightCompiles = new Map<string, Promise<CachedCompileResult>>();
 
 export interface DetectedEngine {
   name: 'tectonic' | 'pdflatex' | 'xelatex' | 'none';
@@ -31,18 +35,28 @@ export interface DetectedEngine {
 }
 
 let cachedEngineInfo: DetectedEngine | null = null;
+let bootstrapPromise: Promise<string | null> | null = null;
+let warmupPromise: Promise<void> | null = null;
+
+const TECTONIC_MUSL_URL =
+  'https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-unknown-linux-musl.tar.gz';
 
 function resolveCandidateBins(): Array<{ name: 'tectonic' | 'pdflatex' | 'xelatex'; bin: string }> {
   const localTectonic = path.resolve(process.cwd(), 'bin', 'tectonic');
+  const tmpTectonic = path.join(os.tmpdir(), 'tectonic');
   const candidates: Array<{ name: 'tectonic' | 'pdflatex' | 'xelatex'; bin: string }> = [];
-  if (fs.existsSync(localTectonic)) {
-    try {
-      fs.chmodSync(localTectonic, 0o755);
-    } catch {
-      // Ignore on read-only fs if already executable
+
+  for (const candidatePath of [localTectonic, tmpTectonic]) {
+    if (fs.existsSync(candidatePath)) {
+      try {
+        fs.chmodSync(candidatePath, 0o755);
+      } catch {
+        // Ignore on read-only fs if already executable
+      }
+      candidates.push({ name: 'tectonic', bin: candidatePath });
     }
-    candidates.push({ name: 'tectonic', bin: localTectonic });
   }
+
   candidates.push(
     { name: 'tectonic', bin: '/usr/local/bin/tectonic' },
     { name: 'tectonic', bin: 'tectonic' },
@@ -79,8 +93,60 @@ function checkBinaryVersion(bin: string, args: string[]): Promise<string | null>
   });
 }
 
+async function bootstrapTectonicBinary(): Promise<string | null> {
+  if (process.platform !== 'linux') return null;
+  if (bootstrapPromise) return bootstrapPromise;
+
+  bootstrapPromise = (async () => {
+    const localBinDir = path.resolve(process.cwd(), 'bin');
+    let targetDir = localBinDir;
+    try {
+      await fsPromises.mkdir(localBinDir, { recursive: true });
+      fs.accessSync(localBinDir, fs.constants.W_OK);
+    } catch {
+      targetDir = os.tmpdir();
+    }
+
+    const targetBin = path.join(targetDir, 'tectonic');
+    if (fs.existsSync(targetBin)) {
+      try {
+        fs.chmodSync(targetBin, 0o755);
+      } catch {
+        // ignore
+      }
+      return targetBin;
+    }
+
+    return new Promise<string | null>((resolve) => {
+      const cmd = `curl -fsSL "${TECTONIC_MUSL_URL}" | tar -xz -C "${targetDir}" tectonic && chmod +x "${targetBin}"`;
+      const child = spawn('sh', ['-c', cmd], { stdio: 'ignore' });
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        resolve(null);
+      }, 25000);
+
+      child.on('error', () => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0 && fs.existsSync(targetBin)) {
+          resolve(targetBin);
+        } else {
+          resolve(null);
+        }
+      });
+    });
+  })().finally(() => {
+    bootstrapPromise = null;
+  });
+
+  return bootstrapPromise;
+}
+
 export async function detectLatexEngine(): Promise<DetectedEngine> {
-  if (cachedEngineInfo && cachedEngineInfo.name !== 'none') {
+  if (cachedEngineInfo && cachedEngineInfo.name !== 'none' && fs.existsSync(cachedEngineInfo.binPath)) {
     return cachedEngineInfo;
   }
 
@@ -90,6 +156,19 @@ export async function detectLatexEngine(): Promise<DetectedEngine> {
       cachedEngineInfo = {
         name: candidate.name,
         binPath: candidate.bin,
+        version,
+      };
+      return cachedEngineInfo;
+    }
+  }
+
+  const downloadedBin = await bootstrapTectonicBinary();
+  if (downloadedBin) {
+    const version = await checkBinaryVersion(downloadedBin, ['--version']);
+    if (version) {
+      cachedEngineInfo = {
+        name: 'tectonic',
+        binPath: downloadedBin,
         version,
       };
       return cachedEngineInfo;
@@ -132,40 +211,53 @@ export function parseLatexLog(rawLog: string): { errors: string[]; warnings: str
   return { errors, warnings };
 }
 
-function resolveWritableHome(): { home: string; xdgCache?: string } {
-  const defaultHome = process.env.HOME || '/root';
-  if (process.env.VERCEL) {
-    return {
-      home: os.tmpdir(),
-      xdgCache: path.join(os.tmpdir(), 'tectonic-cache'),
-    };
+function resolveWritableCacheEnv(): { home: string; xdgCache: string } {
+  const workspaceCacheDir = path.resolve(process.cwd(), '.cache');
+  if (!process.env.VERCEL) {
+    try {
+      fs.mkdirSync(workspaceCacheDir, { recursive: true });
+      fs.accessSync(workspaceCacheDir, fs.constants.W_OK);
+      const defaultHome = process.env.HOME || '/root';
+      // If /root/.cache/Tectonic already has cached files, prefer /root/.cache unless workspaceCacheDir already has Tectonic
+      const rootTectonicFormats = path.join(defaultHome, '.cache', 'Tectonic', 'formats');
+      const workspaceTectonicFormats = path.join(workspaceCacheDir, 'Tectonic', 'formats');
+      if (fs.existsSync(workspaceTectonicFormats)) {
+        return { home: defaultHome, xdgCache: workspaceCacheDir };
+      }
+      if (fs.existsSync(rootTectonicFormats)) {
+        return { home: defaultHome, xdgCache: path.join(defaultHome, '.cache') };
+      }
+      return { home: defaultHome, xdgCache: workspaceCacheDir };
+    } catch {
+      // Fall through to os.tmpdir()
+    }
   }
+
+  const tmpCache = path.join(os.tmpdir(), 'tectonic-cache');
   try {
-    fs.accessSync(defaultHome, fs.constants.W_OK);
-    return { home: defaultHome };
+    fs.mkdirSync(tmpCache, { recursive: true });
   } catch {
-    return {
-      home: os.tmpdir(),
-      xdgCache: path.join(os.tmpdir(), 'tectonic-cache'),
-    };
+    // ignore
   }
+  return {
+    home: os.tmpdir(),
+    xdgCache: tmpCache,
+  };
 }
 
 async function runProcessInTempDir(
   binPath: string,
   args: string[],
   cwd: string,
-  timeoutMs = 20000
+  timeoutMs = 60000
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const { home, xdgCache } = resolveWritableHome();
+    const { home, xdgCache } = resolveWritableCacheEnv();
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       HOME: home,
+      XDG_CACHE_HOME: xdgCache,
     };
-    if (xdgCache) {
-      env.XDG_CACHE_HOME = xdgCache;
-    }
 
     const child = spawn(binPath, args, {
       cwd,
@@ -178,7 +270,7 @@ async function runProcessInTempDir(
 
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      reject(new Error('Kompilasi LaTeX melewati batas waktu 20 detik (Timeout).'));
+      reject(new Error('Kompilasi LaTeX melewati batas waktu 60 detik (Timeout).'));
     }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
@@ -200,6 +292,54 @@ async function runProcessInTempDir(
   });
 }
 
+export async function warmupLatexEngine(): Promise<void> {
+  if (warmupPromise) return warmupPromise;
+
+  warmupPromise = (async () => {
+    const engine = await detectLatexEngine();
+    if (engine.name !== 'tectonic') return;
+
+    await compileQueue.add(async () => {
+      const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'buatcvkuy-warmup-'));
+      const texFilePath = path.join(tempDir, 'warmup.tex');
+      const warmupTex = [
+        '\\documentclass[10pt,a4paper]{article}',
+        '\\usepackage[margin=0.6in]{geometry}',
+        '\\usepackage[T1]{fontenc}',
+        '\\usepackage[utf8]{inputenc}',
+        '\\usepackage{tgtermes}',
+        '\\usepackage{libertinus}',
+        '\\usepackage{ebgaramond}',
+        '\\usepackage{microtype}',
+        '\\usepackage{enumitem}',
+        '\\usepackage{titlesec}',
+        '\\usepackage[hidelinks]{hyperref}',
+        '\\begin{document}',
+        'Harvard OCS LaTeX Warmup',
+        '\\end{document}',
+      ].join('\n');
+
+      try {
+        await fsPromises.writeFile(texFilePath, warmupTex, 'utf8');
+        await runProcessInTempDir(
+          engine.binPath,
+          ['--untrusted', '--outdir', tempDir, texFilePath],
+          tempDir,
+          90000
+        );
+      } catch {
+        // Ignore warmup errors; real compile will report any issue
+      } finally {
+        await fsPromises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+    });
+  })().finally(() => {
+    warmupPromise = null;
+  });
+
+  return warmupPromise;
+}
+
 export async function compileCVToPdf(
   cv: CVData,
   mode: DocumentMode = 'cv'
@@ -217,6 +357,16 @@ export async function compileCVToPdf(
     };
   }
 
+  const existingInFlight = inFlightCompiles.get(contentHash);
+  if (existingInFlight) {
+    const sharedResult = await existingInFlight;
+    return {
+      ...sharedResult,
+      durationMs: Date.now() - startTime,
+      cached: true,
+    };
+  }
+
   const engine = await detectLatexEngine();
   if (engine.name === 'none') {
     throw new Error(
@@ -224,7 +374,13 @@ export async function compileCVToPdf(
     );
   }
 
-  const result = await compileQueue.add(async (): Promise<CachedCompileResult> => {
+  const taskPromise = compileQueue.add(async (): Promise<CachedCompileResult> => {
+    // Re-check cache in case an earlier queued task populated it
+    const cachedInsideQueue = compileCache.get(contentHash);
+    if (cachedInsideQueue) {
+      return cachedInsideQueue;
+    }
+
     const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'buatcvkuy-'));
     const texFilePath = path.join(tempDir, 'resume.tex');
     const pdfFilePath = path.join(tempDir, 'resume.pdf');
@@ -245,7 +401,7 @@ export async function compileCVToPdf(
         ];
       }
 
-      const proc = await runProcessInTempDir(engine.binPath, args, tempDir, 20000);
+      const proc = await runProcessInTempDir(engine.binPath, args, tempDir, 60000);
       const combinedLog = `${proc.stdout}\n${proc.stderr}`;
       const { errors, warnings } = parseLatexLog(combinedLog);
 
@@ -262,26 +418,36 @@ export async function compileCVToPdf(
       const pageCount = pdfDoc.getPageCount();
       const pdfBase64 = pdfBuffer.toString('base64');
 
-      return {
+      const compiledResult: CachedCompileResult = {
         pdfBase64,
         pageCount,
         warnings,
         engine: `${engine.name} (${engine.version})`,
       };
+      compileCache.set(contentHash, compiledResult);
+      return compiledResult;
     } finally {
       await fsPromises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 
-  if (!result) {
-    throw new Error('Antrean kompilasi LaTeX gagal dijalankan.');
+  const wrappedPromise = taskPromise.then((res) => {
+    if (!res) {
+      throw new Error('Antrean kompilasi LaTeX gagal dijalankan.');
+    }
+    return res;
+  });
+
+  inFlightCompiles.set(contentHash, wrappedPromise);
+
+  try {
+    const result = await wrappedPromise;
+    return {
+      ...result,
+      durationMs: Date.now() - startTime,
+      cached: false,
+    };
+  } finally {
+    inFlightCompiles.delete(contentHash);
   }
-
-  compileCache.set(contentHash, result);
-
-  return {
-    ...result,
-    durationMs: Date.now() - startTime,
-    cached: false,
-  };
 }
