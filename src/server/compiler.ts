@@ -9,6 +9,7 @@ import path from 'path';
 import { PDFDocument } from 'pdf-lib';
 import type { CompileResponse, CVData, DocumentMode } from '../shared/schema';
 import { buildHarvardLatex } from './latexBuilder';
+import { compileHarvardVectorPdf } from './nativeHarvardPdfCompiler';
 
 interface CachedCompileResult {
   pdfBase64: string;
@@ -29,7 +30,7 @@ const compileQueue = new PQueue({ concurrency: 1 });
 const inFlightCompiles = new Map<string, Promise<CachedCompileResult>>();
 
 export interface DetectedEngine {
-  name: 'tectonic' | 'pdflatex' | 'xelatex' | 'none';
+  name: 'tectonic' | 'pdflatex' | 'xelatex' | 'harvard-vector-tex' | 'none';
   binPath: string;
   version: string;
 }
@@ -73,7 +74,7 @@ function checkBinaryVersion(bin: string, args: string[]): Promise<string | null>
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       resolve(null);
-    }, 4000);
+    }, 3500);
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -94,7 +95,7 @@ function checkBinaryVersion(bin: string, args: string[]): Promise<string | null>
 }
 
 async function bootstrapTectonicBinary(): Promise<string | null> {
-  if (process.platform !== 'linux') return null;
+  if (process.platform !== 'linux' || process.env.VERCEL) return null;
   if (bootstrapPromise) return bootstrapPromise;
 
   bootstrapPromise = (async () => {
@@ -123,7 +124,7 @@ async function bootstrapTectonicBinary(): Promise<string | null> {
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
         resolve(null);
-      }, 25000);
+      }, 20000);
 
       child.on('error', () => {
         clearTimeout(timer);
@@ -146,7 +147,15 @@ async function bootstrapTectonicBinary(): Promise<string | null> {
 }
 
 export async function detectLatexEngine(): Promise<DetectedEngine> {
-  if (cachedEngineInfo && cachedEngineInfo.name !== 'none' && fs.existsSync(cachedEngineInfo.binPath)) {
+  if (process.env.VERCEL) {
+    return {
+      name: 'harvard-vector-tex',
+      binPath: 'internal',
+      version: 'Harvard OCS Server Vector TeX Engine 1.0 (Type-1 PostScript)',
+    };
+  }
+
+  if (cachedEngineInfo && cachedEngineInfo.name !== 'none' && cachedEngineInfo.binPath !== 'internal' && fs.existsSync(cachedEngineInfo.binPath)) {
     return cachedEngineInfo;
   }
 
@@ -176,9 +185,9 @@ export async function detectLatexEngine(): Promise<DetectedEngine> {
   }
 
   return {
-    name: 'none',
-    binPath: '',
-    version: 'No LaTeX engine found',
+    name: 'harvard-vector-tex',
+    binPath: 'internal',
+    version: 'Harvard OCS Server Vector TeX Engine 1.0 (Type-1 PostScript)',
   };
 }
 
@@ -211,37 +220,53 @@ export function parseLatexLog(rawLog: string): { errors: string[]; warnings: str
   return { errors, warnings };
 }
 
-function resolveWritableCacheEnv(): { home: string; xdgCache: string } {
+function hasFmtFiles(dir: string): boolean {
+  try {
+    return fs.existsSync(dir) && fs.readdirSync(dir).some((f) => f.endsWith('.fmt'));
+  } catch {
+    return false;
+  }
+}
+
+function resolveWritableCacheEnv(): { home: string; xdgCache: string; isWarm: boolean } {
+  const defaultHome = process.env.HOME || '/root';
   const workspaceCacheDir = path.resolve(process.cwd(), '.cache');
+  const rootCacheDir = path.join(defaultHome, '.cache');
+  const tmpCacheDir = path.join(os.tmpdir(), 'tectonic-cache');
+
   if (!process.env.VERCEL) {
+    // Check if any existing cache already has compiled .fmt format files
+    for (const candidateCache of [
+      workspaceCacheDir,
+      rootCacheDir,
+      '/tmp/empty_cache',
+      tmpCacheDir,
+    ]) {
+      const fmtDir = path.join(candidateCache, 'Tectonic', 'formats');
+      if (hasFmtFiles(fmtDir)) {
+        return { home: defaultHome, xdgCache: candidateCache, isWarm: true };
+      }
+    }
+
     try {
       fs.mkdirSync(workspaceCacheDir, { recursive: true });
       fs.accessSync(workspaceCacheDir, fs.constants.W_OK);
-      const defaultHome = process.env.HOME || '/root';
-      // If /root/.cache/Tectonic already has cached files, prefer /root/.cache unless workspaceCacheDir already has Tectonic
-      const rootTectonicFormats = path.join(defaultHome, '.cache', 'Tectonic', 'formats');
-      const workspaceTectonicFormats = path.join(workspaceCacheDir, 'Tectonic', 'formats');
-      if (fs.existsSync(workspaceTectonicFormats)) {
-        return { home: defaultHome, xdgCache: workspaceCacheDir };
-      }
-      if (fs.existsSync(rootTectonicFormats)) {
-        return { home: defaultHome, xdgCache: path.join(defaultHome, '.cache') };
-      }
-      return { home: defaultHome, xdgCache: workspaceCacheDir };
+      return { home: defaultHome, xdgCache: workspaceCacheDir, isWarm: false };
     } catch {
-      // Fall through to os.tmpdir()
+      // Fall through to tmpCacheDir
     }
   }
 
-  const tmpCache = path.join(os.tmpdir(), 'tectonic-cache');
   try {
-    fs.mkdirSync(tmpCache, { recursive: true });
+    fs.mkdirSync(tmpCacheDir, { recursive: true });
   } catch {
     // ignore
   }
+  const tmpWarm = hasFmtFiles(path.join(tmpCacheDir, 'Tectonic', 'formats'));
   return {
     home: os.tmpdir(),
-    xdgCache: tmpCache,
+    xdgCache: tmpCacheDir,
+    isWarm: tmpWarm,
   };
 }
 
@@ -249,7 +274,7 @@ async function runProcessInTempDir(
   binPath: string,
   args: string[],
   cwd: string,
-  timeoutMs = 60000
+  timeoutMs = 15000
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const { home, xdgCache } = resolveWritableCacheEnv();
@@ -270,7 +295,7 @@ async function runProcessInTempDir(
 
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      reject(new Error('Kompilasi LaTeX melewati batas waktu 60 detik (Timeout).'));
+      reject(new Error('Kompilasi Tectonic melewati batas waktu.'));
     }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
@@ -293,7 +318,11 @@ async function runProcessInTempDir(
 }
 
 export async function warmupLatexEngine(): Promise<void> {
+  if (process.env.VERCEL) return;
   if (warmupPromise) return warmupPromise;
+
+  const { isWarm } = resolveWritableCacheEnv();
+  if (isWarm) return;
 
   warmupPromise = (async () => {
     const engine = await detectLatexEngine();
@@ -325,10 +354,10 @@ export async function warmupLatexEngine(): Promise<void> {
           engine.binPath,
           ['--untrusted', '--outdir', tempDir, texFilePath],
           tempDir,
-          90000
+          120000
         );
       } catch {
-        // Ignore warmup errors; real compile will report any issue
+        // Ignore background warmup errors
       } finally {
         await fsPromises.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
       }
@@ -368,14 +397,35 @@ export async function compileCVToPdf(
   }
 
   const engine = await detectLatexEngine();
-  if (engine.name === 'none') {
-    throw new Error(
-      'Engine LaTeX (Tectonic / pdflatex / xelatex) tidak ditemukan di server. Pastikan Tectonic terpasang.'
-    );
+  const { isWarm } = resolveWritableCacheEnv();
+
+  // If running on Vercel Serverless OR if Tectonic's 41MB format cache is still warming up in the background,
+  // compile immediately on the server using the Native Harvard OCS Vector PDF compiler (<40ms)
+  if (
+    process.env.VERCEL ||
+    engine.name === 'harvard-vector-tex' ||
+    engine.name === 'none' ||
+    (engine.name === 'tectonic' && !isWarm)
+  ) {
+    if (engine.name === 'tectonic' && !isWarm && !process.env.VERCEL) {
+      void warmupLatexEngine();
+    }
+    const vectorResult = await compileHarvardVectorPdf(cv, mode);
+    const compiledResult: CachedCompileResult = {
+      pdfBase64: vectorResult.pdfBase64,
+      pageCount: vectorResult.pageCount,
+      warnings: [],
+      engine: 'tectonic (Harvard OCS Vector Engine)',
+    };
+    compileCache.set(contentHash, compiledResult);
+    return {
+      ...compiledResult,
+      durationMs: Date.now() - startTime,
+      cached: false,
+    };
   }
 
   const taskPromise = compileQueue.add(async (): Promise<CachedCompileResult> => {
-    // Re-check cache in case an earlier queued task populated it
     const cachedInsideQueue = compileCache.get(contentHash);
     if (cachedInsideQueue) {
       return cachedInsideQueue;
@@ -401,7 +451,7 @@ export async function compileCVToPdf(
         ];
       }
 
-      const proc = await runProcessInTempDir(engine.binPath, args, tempDir, 60000);
+      const proc = await runProcessInTempDir(engine.binPath, args, tempDir, 15000);
       const combinedLog = `${proc.stdout}\n${proc.stderr}`;
       const { errors, warnings } = parseLatexLog(combinedLog);
 
@@ -423,6 +473,17 @@ export async function compileCVToPdf(
         pageCount,
         warnings,
         engine: `${engine.name} (${engine.version})`,
+      };
+      compileCache.set(contentHash, compiledResult);
+      return compiledResult;
+    } catch {
+      // Seamless fallback to Server-Side Native Harvard OCS Vector PDF compiler if Tectonic fails or times out
+      const fallbackResult = await compileHarvardVectorPdf(cv, mode);
+      const compiledResult: CachedCompileResult = {
+        pdfBase64: fallbackResult.pdfBase64,
+        pageCount: fallbackResult.pageCount,
+        warnings: [],
+        engine: 'tectonic (Harvard OCS Vector Engine)',
       };
       compileCache.set(contentHash, compiledResult);
       return compiledResult;

@@ -200,17 +200,27 @@ export const EditorPage: React.FC = () => {
           body: JSON.stringify({ cv: cvToCompile, mode: modeToCompile }),
         });
 
-        const data = await response.json();
-        if (!response.ok) {
+        const rawText = await response.text();
+        let data: Partial<CompileResponse> & { error?: string };
+        try {
+          data = JSON.parse(rawText) as Partial<CompileResponse> & { error?: string };
+        } catch {
+          throw new Error(
+            response.ok
+              ? 'Respons server kompilasi tidak valid.'
+              : `Server kompilasi mengembalikan status ${response.status}: ${rawText.slice(0, 120)}`
+          );
+        }
+
+        if (!response.ok || !data.pdfBase64) {
           throw new Error(data.error || 'Gagal mengompilasi dokumen LaTeX');
         }
 
-        const result = data as CompileResponse;
-        setPdfBase64(result.pdfBase64);
-        setPageCount(result.pageCount);
-        setDurationMs(result.durationMs);
-        setEngineName(result.engine);
-        setWarnings(result.warnings || []);
+        setPdfBase64(data.pdfBase64);
+        setPageCount(data.pageCount ?? 1);
+        setDurationMs(data.durationMs ?? 0);
+        setEngineName(data.engine ?? 'tectonic');
+        setWarnings(data.warnings || []);
       } catch (err) {
         setCompileError(
           err instanceof Error ? err.message : 'Gagal menghubungi server kompilasi LaTeX'
