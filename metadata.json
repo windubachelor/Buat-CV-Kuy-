@@ -1,0 +1,6 @@
+{
+  "name": "Buat CV Kuy — Harvard LaTeX Resume Builder",
+  "description": "Pembuat CV bergaya Harvard Business School (OCS) dengan kompilasi PDF LaTeX native (Tectonic/pdflatex) yang ATS-friendly, selectable, dan modern.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

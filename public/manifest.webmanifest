@@ -1,0 +1,16 @@
+{
+  "name": "Buat CV Kuy — Harvard LaTeX Resume Builder",
+  "short_name": "Buat CV Kuy",
+  "description": "Pembuat CV bergaya Harvard Business School (OCS) dengan kompilasi PDF LaTeX native (Tectonic/pdflatex).",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF9FF",
+  "theme_color": "#B8A9F5",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

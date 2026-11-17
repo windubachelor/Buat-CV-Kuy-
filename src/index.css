@@ -1,0 +1,236 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* 4px Spacing Scale */
+  --space-1: 0.25rem;  /* 4px */
+  --space-2: 0.5rem;   /* 8px */
+  --space-3: 0.75rem;  /* 12px */
+  --space-4: 1rem;     /* 16px */
+  --space-5: 1.25rem;  /* 20px */
+  --space-6: 1.5rem;   /* 24px */
+  --space-8: 2rem;     /* 32px */
+  --space-10: 2.5rem;  /* 40px */
+  --space-12: 3rem;    /* 48px */
+
+  /* Radius Scale (8 / 12 / 16 / 24px) */
+  --radius-sm: 0.5rem;   /* 8px */
+  --radius-md: 0.75rem;  /* 12px */
+  --radius-lg: 1rem;     /* 16px */
+  --radius-xl: 1.5rem;   /* 24px */
+  --radius: 0.875rem;
+
+  /* 5-Level Layered Shadows (Lavender-tinted rgba(120,100,200, 0.08–0.18)) */
+  --shadow-1: 0 1px 2px rgba(120, 100, 200, 0.06), 0 2px 4px rgba(120, 100, 200, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --shadow-2: 0 2px 4px rgba(120, 100, 200, 0.07), 0 6px 14px -2px rgba(120, 100, 200, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  --shadow-3: 0 4px 8px rgba(120, 100, 200, 0.08), 0 12px 24px -4px rgba(120, 100, 200, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --shadow-4: 0 8px 16px rgba(120, 100, 200, 0.10), 0 20px 36px -6px rgba(120, 100, 200, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --shadow-5: 0 14px 28px rgba(120, 100, 200, 0.12), 0 28px 56px -8px rgba(120, 100, 200, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+  /* Surfaces & Pastel Palette (Light Mode) */
+  --background: #FAF9FF;
+  --surface: #FFFFFF;
+  --elevated: #FFFFFF;
+  --foreground: #1F1B2E;
+  --card: #FFFFFF;
+  --card-foreground: #1F1B2E;
+  --popover: #FFFFFF;
+  --popover-foreground: #1F1B2E;
+  --primary: #B8A9F5;
+  --primary-foreground: #2A2150;
+  --secondary: #BFEBD7;
+  --secondary-foreground: #133A29;
+  --muted: #F3F0FC;
+  --muted-foreground: #5B5475;
+  --accent-peach: #FFD3B6;
+  --accent-sky: #BDE0FE;
+  --accent-butter: #FFF1B8;
+  --accent-rose: #FFC8DD;
+  --border: rgba(132, 112, 210, 0.16);
+  --border-strong: rgba(132, 112, 210, 0.28);
+  --input: rgba(132, 112, 210, 0.2);
+  --ring: #9B86EC;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+}
+
+.dark {
+  /* Tiered Dark Mode Surfaces (Designed, not inverted) */
+  --background: #0E0C16;
+  --surface: #151221;
+  --elevated: #1D192E;
+  --foreground: #F4F2FA;
+  --card: #151221;
+  --card-foreground: #F4F2FA;
+  --popover: #1D192E;
+  --popover-foreground: #F4F2FA;
+  --primary: #B8A9F5;
+  --primary-foreground: #1A1438;
+  --secondary: #214033;
+  --secondary-foreground: #D3F5E6;
+  --muted: #1E1A30;
+  --muted-foreground: #A69FC2;
+  --accent-peach: #3B281D;
+  --accent-sky: #1A3044;
+  --accent-butter: #3A341C;
+  --accent-rose: #3E1F2D;
+  --border: rgba(184, 169, 245, 0.12);
+  --border-strong: rgba(184, 169, 245, 0.24);
+  --input: rgba(184, 169, 245, 0.16);
+  --ring: #B8A9F5;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+
+  --shadow-1: 0 1px 2px rgba(8, 6, 16, 0.4), 0 2px 4px rgba(120, 100, 200, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow-2: 0 4px 10px rgba(8, 6, 16, 0.5), 0 6px 16px -2px rgba(120, 100, 200, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-3: 0 8px 20px rgba(8, 6, 16, 0.6), 0 12px 28px -4px rgba(120, 100, 200, 0.11), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --shadow-4: 0 12px 28px rgba(8, 6, 16, 0.7), 0 20px 40px -6px rgba(120, 100, 200, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-5: 0 20px 44px rgba(8, 6, 16, 0.8), 0 28px 60px -8px rgba(120, 100, 200, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+@layer base {
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, .font-heading, .font-stat, .tabular-nums {
+    font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Typography Scale Classes */
+  .text-display {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(2.35rem, 4.2vw, 3.75rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    font-weight: 700;
+  }
+
+  .text-h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(1.75rem, 2.5vw, 2.25rem);
+    line-height: 1.18;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+  }
+
+  .text-h2 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: clamp(1.25rem, 1.8vw, 1.5rem);
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+
+  .text-h3 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.125rem;
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+
+  .text-caption {
+    font-size: 0.75rem;
+    line-height: 1.4;
+  }
+}
+
+/* Layered Elevation & Surface Utilities */
+.surface-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  border-radius: var(--radius-lg);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 180ms ease;
+}
+
+.surface-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-3);
+  border-color: var(--border-strong);
+}
+
+.surface-elevated {
+  background-color: var(--elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-2);
+  border-radius: var(--radius-lg);
+}
+
+.bg-hero-gradient {
+  background: linear-gradient(135deg, rgba(184, 169, 245, 0.28) 0%, rgba(189, 224, 254, 0.26) 50%, rgba(191, 235, 215, 0.18) 100%);
+}
+
+.dark .bg-hero-gradient {
+  background: linear-gradient(135deg, rgba(184, 169, 245, 0.12) 0%, rgba(30, 55, 77, 0.22) 55%, rgba(38, 74, 59, 0.14) 100%);
+}
+
+.btn-lavender-gradient {
+  background: linear-gradient(135deg, #C4B7F9 0%, #A996F2 55%, #9ED2FC 100%);
+  color: #211942;
+  box-shadow: 0 2px 8px rgba(155, 134, 236, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.btn-lavender-gradient:hover {
+  background: linear-gradient(135deg, #B8A9F5 0%, #9E89EE 55%, #8EC8FA 100%);
+  box-shadow: 0 6px 16px rgba(155, 134, 236, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+/* Shimmer Skeleton */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(184, 169, 245, 0.10) 25%,
+    rgba(184, 169, 245, 0.24) 50%,
+    rgba(184, 169, 245, 0.10) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s infinite linear;
+}
+
+/* Marquee Animation */
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 32s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
