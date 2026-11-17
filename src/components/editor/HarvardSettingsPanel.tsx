@@ -183,11 +183,12 @@ export const HarvardSettingsPanel: React.FC<{
                   d.settings.fontSize = '11pt';
                   d.settings.showLinksIcon = false;
                 } else if (preset === 'jakes') {
-                  d.settings.fontFamily = 'tgtermes';
+                  d.settings.fontFamily = 'lmodern';
+                  d.settings.paperSize = 'letter';
                   d.settings.margin = 'compact';
                   d.settings.sectionSpacing = 'compact';
-                  d.settings.fontSize = '10pt';
-                  d.settings.showLinksIcon = true;
+                  d.settings.fontSize = '11pt';
+                  d.settings.showLinksIcon = false;
                 } else if (preset === 'wharton') {
                   d.settings.fontFamily = 'tgtermes';
                   d.settings.margin = 'narrow';
@@ -202,14 +203,14 @@ export const HarvardSettingsPanel: React.FC<{
                   d.settings.fontSize = '10.5pt';
                   d.settings.showLinksIcon = false;
                 } else if (preset === 'cover_letter_1') {
-                  d.settings.fontFamily = 'libertinus';
-                  d.settings.margin = 'narrow';
-                  d.settings.sectionSpacing = 'compact';
-                  d.settings.fontSize = '10.5pt';
+                  d.settings.fontFamily = 'lmodern';
+                  d.settings.margin = 'normal';
+                  d.settings.sectionSpacing = 'normal';
+                  d.settings.fontSize = '11pt';
                   d.settings.cvLanguage = 'id';
                   d.settings.showLinksIcon = false;
                 } else if (preset === 'simple_letter') {
-                  d.settings.fontFamily = 'tgtermes';
+                  d.settings.fontFamily = 'lmodern';
                   d.settings.margin = 'normal';
                   d.settings.sectionSpacing = 'normal';
                   d.settings.fontSize = '11pt';
@@ -232,7 +233,7 @@ export const HarvardSettingsPanel: React.FC<{
               <option value="academic">Harvard Academic &amp; Research CV (Riset &amp; Beasiswa)</option>
             </optgroup>
             <optgroup label="Adaptasi Template Resume Overleaf (.tex)">
-              <option value="jakes">Jake&apos;s Resume — Overleaf SWE Edition (Tech)</option>
+              <option value="jakes">Jake&apos;s Resume — Overleaf SWE Edition (Computer Modern)</option>
               <option value="wharton">Wharton &amp; Wall Street M&amp;A Finance (Garis Kop Tunggal)</option>
               <option value="mckinsey">McKinsey &amp; Executive Double-Rule (Garis Kop Ganda)</option>
             </optgroup>
@@ -266,12 +267,17 @@ export const HarvardSettingsPanel: React.FC<{
             value={settings.fontFamily}
             onChange={(e) =>
               updateCV((d) => {
-                d.settings.fontFamily = e.target.value as 'tgtermes' | 'libertinus' | 'ebgaramond';
+                d.settings.fontFamily = e.target.value as
+                  | 'lmodern'
+                  | 'tgtermes'
+                  | 'libertinus'
+                  | 'ebgaramond';
                 return d;
               })
             }
             className="w-full h-10 rounded-xl border border-[#E8E4F8] dark:border-[#2E2944] bg-white dark:bg-[#151221] px-3 text-sm"
           >
+            <option value="lmodern">Computer Modern / Latin Modern (Standar Asli LaTeX Overleaf)</option>
             <option value="tgtermes">TeX Gyre Termes (Times-like Harvard Default)</option>
             <option value="libertinus">Libertinus Serif (Editorial Tajam)</option>
             <option value="ebgaramond">EB Garamond (Klasik Akademik)</option>

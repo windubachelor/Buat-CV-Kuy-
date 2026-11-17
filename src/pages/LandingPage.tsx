@@ -219,9 +219,9 @@ export const LandingPage: React.FC = () => {
                   <span>{t('landing.ctaPrimary')}</span>
                   <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" strokeWidth={2.5} />
                 </Button>
-                <Button variant="outline" size="lg" onClick={() => navigate('/templates')}>
+                <Button variant="outline" size="lg" onClick={() => navigate('/dashboard')}>
                   <BookOpen className="w-5 h-5" strokeWidth={2.5} />
-                  <span>{t('landing.ctaSecondary')}</span>
+                  <span>{prefs.uiLanguage === 'id' ? 'Masuk Tanpa Login' : 'Continue Without Login'}</span>
                 </Button>
               </div>
 
@@ -519,11 +519,11 @@ export const LandingPage: React.FC = () => {
             </p>
             <div className="flex flex-wrap justify-center gap-3 pt-2">
               <Button variant="gradient" size="lg" onClick={handleStartNow}>
-                <span>{currentUser ? 'Buka Ruang Kerja Sekarang' : 'Masuk & Mulai Buat CV Sekarang'}</span>
+                <span>{currentUser ? 'Buka Ruang Kerja Sekarang' : 'Mulai Buat CV Sekarang'}</span>
                 <ArrowRight className="w-5 h-5" strokeWidth={2.5} />
               </Button>
-              <Button variant="outline" size="lg" onClick={() => navigate('/templates')}>
-                <span>Lihat 8 Template LaTeX</span>
+              <Button variant="outline" size="lg" onClick={() => navigate('/dashboard')}>
+                <span>{prefs.uiLanguage === 'id' ? 'Masuk Tanpa Login' : 'Continue Without Login'}</span>
               </Button>
             </div>
           </div>

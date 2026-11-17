@@ -211,32 +211,48 @@ function buildCoverLetterBodyBlock(
     ? `\\vspace{12pt}\n\\noindent\\textit{${escapeLatex(cl.postscript.trim())}}\\par`
     : '';
 
-  // Style 1: Overleaf cover_letter_1.tex (ModernCV Classic Indonesian Style)
+  // Style 1: Overleaf cover_letter_1.tex (ModernCV Classic Roman Style — Top-Right Sender Block, Italic Recipient, Open Circle Bullets)
   if (preset === 'cover_letter_1') {
     const senderRightLines = [
-      cv.personalInfo.location.trim() ? escapeLatex(cv.personalInfo.location.trim()) : '',
-      cv.personalInfo.phone.trim() ? escapeLatex(cv.personalInfo.phone.trim()) : '',
-      cv.personalInfo.email.trim() ? escapeLatex(cv.personalInfo.email.trim()) : '',
+      `\\textbf{${headerName}}`,
+      cv.personalInfo.location.trim()
+        ? `\\textit{${escapeLatex(cv.personalInfo.location.trim())}}`
+        : '',
+      cv.personalInfo.phone.trim()
+        ? `\\textit{${escapeLatex(cv.personalInfo.phone.trim())}}`
+        : '',
+      cv.personalInfo.email.trim()
+        ? `\\textit{${escapeLatex(cv.personalInfo.email.trim())}}`
+        : '',
     ].filter(Boolean);
 
+    const italicRecipientLines = [
+      cl.recipientName.trim() ? `\\textit{${escapeLatex(cl.recipientName.trim())}}` : '',
+      cl.recipientTitle.trim() ? `\\textit{${escapeLatex(cl.recipientTitle.trim())}}` : '',
+      cl.companyName.trim() ? `\\textit{${escapeLatex(cl.companyName.trim())}}` : '',
+      cl.companyAddress.trim() ? `\\textit{${escapeLatex(cl.companyAddress.trim())}}` : '',
+    ].filter(Boolean);
+
+    const circleFormattedParagraphs = formattedParagraphs.replace(
+      /\\begin\{itemize\}/g,
+      '\\begin{itemize}[label=$\\circ$]'
+    );
+
     return `% === SECTION: coverLetter ===
-\\noindent\\begin{tabular*}{\\textwidth}{@{\\extracolsep{\\fill}}lr@{}}
-  {\\LARGE\\bfseries ${headerName}} & {\\small ${senderRightLines[0] || ''}} \\\\
-  {\\small\\textit{${escapeLatex(cv.personalInfo.headline || '')}}} & {\\small ${senderRightLines.slice(1).join(' $\\cdot$ ')}}
-\\end{tabular*}
-\\vspace{4pt}
-\\noindent\\rule{\\textwidth}{0.75pt}
-\\vspace{12pt}
+\\begin{flushright}
+  ${senderRightLines.join('\\\\\n  ')}
+\\end{flushright}
+\\vspace{10pt}
 
 \\noindent\\textbf{${isId ? 'Kepada Yth.' : 'To'}} \\hfill ${dateLine}\\\\
-${recipientLines.join('\\\\\n')}\\par
+${italicRecipientLines.join('\\\\\n')}\\par
 ${subjectBlock}\\vspace{10pt}
 \\noindent ${salutation}\\par
 \\vspace{8pt}
-${formattedParagraphs}
+${circleFormattedParagraphs}
 \\vspace{14pt}
 \\noindent ${signOff}\\par
-\\vspace{20pt}
+\\vspace{18pt}
 \\noindent\\textbf{${headerName}}\\par
 ${enclosureBlock}
 ${postscriptBlock}`;
@@ -328,7 +344,14 @@ export function buildHarvardLatex(cv: CVData, mode: DocumentMode = 'cv'): string
 
   // Font family package selection
   let fontPackageLatex = '\\usepackage{tgtermes}';
-  if (settings.fontFamily === 'libertinus') {
+  if (
+    settings.fontFamily === 'lmodern' ||
+    settings.templatePreset === 'jakes' ||
+    settings.templatePreset === 'cover_letter_1' ||
+    settings.templatePreset === 'simple_letter'
+  ) {
+    fontPackageLatex = '\\usepackage{lmodern}';
+  } else if (settings.fontFamily === 'libertinus') {
     fontPackageLatex = '\\usepackage{libertinus}';
   } else if (settings.fontFamily === 'ebgaramond') {
     fontPackageLatex = '\\usepackage{ebgaramond}';

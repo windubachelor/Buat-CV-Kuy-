@@ -81,17 +81,17 @@ const MINIATURE_DATA: Record<
     ],
   },
   jakes: {
-    candidateName: 'Raka Mahendra Putra',
-    headline: 'Full-Stack & Cloud Infrastructure Engineer',
-    contact: 'Jakarta · raka@dev.id · [in] linkedin.com/in/rakadev · [gh] github.com/rakadev',
-    sec1Title: 'Experience',
-    sec1Left: 'GoTo Financial — Core Platform',
-    sec1Sub: 'Senior Software Engineer (Go, Kubernetes, Kafka, PostgreSQL)',
-    sec1Date: 'Jan 2023 – Present',
-    sec2Title: 'Selected Projects',
+    candidateName: 'Jake Ryan',
+    headline: '',
+    contact: '123-456-7890 | jake@su.edu | linkedin.com/in/jake | github.com/jake',
+    sec1Title: 'Education',
+    sec1Left: 'Southwestern University',
+    sec1Sub: 'Bachelor of Arts in Computer Science, Minor in Business',
+    sec1Date: 'Aug. 2018 – May 2021',
+    sec2Title: 'Experience',
     bullets: [
-      'Built zero-downtime schema migration engine handling 40TB+ sharded Postgres clusters.',
-      'Open-sourced high-throughput gRPC rate-limiter with 1.4k+ GitHub stars.',
+      'Developed a REST API using FastAPI and PostgreSQL to store data from learning management systems.',
+      'Explored ways to visualize GitHub collaboration in a classroom setting.',
     ],
   },
   wharton: {
@@ -123,17 +123,17 @@ const MINIATURE_DATA: Record<
     ],
   },
   cover_letter_1: {
-    candidateName: 'Dita Dwi Auliani, M.Kom.',
-    headline: 'Dosen & Peneliti Ilmu Komputer (AI & Aplikasi Komputer)',
-    contact: 'Palembang, Sumatera Selatan · (+62) 895-6098-40692 · ditaauliani13@gmail.com',
-    sec1Title: 'Kepada Yth. Panitia Seleksi Dosen',
-    sec1Left: 'FKIP Universitas Sriwijaya — Pendidikan Matematika',
-    sec1Sub: 'Perihal: Lamaran Posisi Dosen Tamu (Aplikasi Komputer)',
-    sec1Date: '27 Januari 2025',
-    sec2Title: 'Ringkasan Kualifikasi & Lampiran (10 Berkas)',
+    candidateName: 'Dita Dwi Auliani',
+    headline: 'Jakarta Barat, DKI Jakarta - Indonesia',
+    contact: '+62 812-3456-7890 · dita.ars@gmail.com',
+    sec1Title: 'Kepada Yth.',
+    sec1Left: 'Ketua Program Studi / Dosen Penanggung Jawab,',
+    sec1Sub: 'Departemen Aplikasi Komputer, Universitas Indonesia (Kampus Depok)',
+    sec1Date: '2 Mei 2026',
+    sec2Title: 'Perihal: Lamaran untuk Posisi Dosen Tamu (Aplikasi Komputer)',
     bullets: [
-      'Lulusan Magister Ilmu Komputer (M.Kom.) Unsri bidang AI, Machine Learning & Deep Learning.',
-      'Lampiran: CV, Ijazah S1/S2, Transkrip Akademik, Sertifikat TOEFL/USEPT, Bukti Publikasi.',
+      'sebagai Asisten Dosen selama studi Magister (S2) di Institut Teknologi Bandung',
+      'sebagai Pembimbing Tugas Akhir bagi seorang mahasiswa Magister (S2)',
     ],
   },
   simple_letter: {
@@ -155,25 +155,26 @@ const MINIATURE_DATA: Record<
 function buildLatexSnippetPreview(preset: TemplatePresetMeta): string {
   if (preset.id === 'cover_letter_1') {
     return `% Template Preset: ${preset.nameId} (cover_letter_1)
-\\documentclass[11pt,a4paper,sans]{moderncv}
+\\documentclass[11pt,a4paper,roman]{moderncv}
+\\usepackage[english]{babel}
 \\moderncvstyle{classic}
-\\moderncvcolor{blue}
+\\moderncvcolor{black}
 \\usepackage[utf8]{inputenc}
 \\usepackage[scale=0.75]{geometry}
 
 \\name{Dita Dwi}{Auliani}
-\\address{Palembang, Sumatera Selatan}{Indonesia}
-\\phone[mobile]{(+62) 895-6098-40692}
-\\email{ditaauliani13@gmail.com}
+\\address{Jakarta Barat, DKI Jakarta}{Indonesia}
+\\phone[mobile]{+62~812~3456~7890}
+\\email{dita.ars@gmail.com}
 
 \\begin{document}
-\\recipient{Yth. Panitia Seleksi Dosen}{FKIP Universitas Sriwijaya\\\\Palembang}
-\\date{27 Januari 2025}
-\\opening{\\textbf{Perihal: Lamaran untuk Posisi Dosen Tamu (Aplikasi Komputer)}\\\\[1em]Dengan hormat,}
+\\recipient{Kepada Yth.}{\\textit{Ketua Program Studi / Dosen Penanggung Jawab,}\\\\\\textit{Departemen Aplikasi Komputer,}\\\\\\textit{Universitas Indonesia (Kampus Depok)}}
+\\date{2 Mei 2026}
+\\opening{\\textbf{Perihal: Lamaran untuk Posisi Dosen Tamu (Aplikasi Komputer) dengan referensi pengumuman: XXXX/XX, tertanggal 04-03-2026.}}
 \\closing{Hormat saya,}
-\\enclosure[Lampiran]{CV, Ijazah S1/S2, Transkrip, Sertifikat TOEFL/USEPT, Publikasi}
+\\enclosure[Lampiran (Berkas / Sertifikat Terlampir)]{CV, Ijazah S1/S2, Transkrip, Sertifikat}
 \\makelettertitle
-% ... Isi Surat Lamaran & Point Kualifikasi ...
+% ... Isi Surat Lamaran & Point Pengalaman Mengajar (◦) ...
 \\makeletterclosing
 \\end{document}`;
   }
@@ -183,7 +184,7 @@ function buildLatexSnippetPreview(preset: TemplatePresetMeta): string {
 \\documentclass{letter}
 \\usepackage[utf8]{inputenc}
 \\usepackage[margin=1in]{geometry}
-\\usepackage{tgtermes}
+\\usepackage{lmodern}
 
 \\signature{Bagaskara Adi Pratama}
 \\address{Jakarta Selatan, Indonesia \\\\ +62 812-8940-3120 \\\\ bagaskara.pratama@alumni.ui.ac.id}
@@ -200,11 +201,13 @@ function buildLatexSnippetPreview(preset: TemplatePresetMeta): string {
 
   const rec = preset.recommendedSettings;
   const fontPkg =
-    rec.fontFamily === 'libertinus'
-      ? '\\usepackage{libertinus}'
-      : rec.fontFamily === 'ebgaramond'
-        ? '\\usepackage{ebgaramond}'
-        : '\\usepackage{tgtermes}';
+    rec.fontFamily === 'lmodern'
+      ? '\\usepackage{lmodern}'
+      : rec.fontFamily === 'libertinus'
+        ? '\\usepackage{libertinus}'
+        : rec.fontFamily === 'ebgaramond'
+          ? '\\usepackage{ebgaramond}'
+          : '\\usepackage{tgtermes}';
   const margin =
     rec.margin === 'compact' || preset.id === 'jakes'
       ? '0.45in'
@@ -404,48 +407,100 @@ export const TemplatesPage: React.FC = () => {
                     onClick={() => setPreviewPreset(preset)}
                   >
                     <div className="bg-white text-black rounded-lg p-3.5 shadow-xs border border-neutral-200 font-serif space-y-2">
-                      {/* Header Block with Small-Caps simulation and optional single/double rule */}
-                      <div
-                        className={`text-center pb-1.5 ${
-                          preset.previewHeaderRule === 'single'
-                            ? 'border-b border-black'
-                            : preset.previewHeaderRule === 'double'
-                              ? 'border-b-[3px] border-double border-black'
-                              : ''
-                        }`}
-                      >
-                        <p className="font-bold tracking-wider text-[11px] uppercase">
-                          {mini.candidateName}
-                        </p>
-                        <p className="italic text-[8.5px] text-neutral-700">{mini.headline}</p>
-                        <p className="text-[7.5px] text-neutral-600 mt-0.5 truncate">
-                          {mini.contact}
-                        </p>
-                      </div>
+                      {preset.id === 'cover_letter_1' ? (
+                        <>
+                          {/* ModernCV Classic Cover Letter #1: Top-Right Sender Block */}
+                          <div className="text-right space-y-0.5 text-[7.5px] leading-tight">
+                            <p className="font-bold text-[9px]">{mini.candidateName}</p>
+                            <p className="italic text-neutral-700">{mini.headline}</p>
+                            <p className="italic text-neutral-700">{mini.contact}</p>
+                          </div>
 
-                      {/* Section 1 */}
-                      <div className="space-y-0.5 text-[8.5px]">
-                        <p className="font-bold uppercase tracking-wide border-b border-black pb-0.5 text-[8.5px]">
-                          {mini.sec1Title}
-                        </p>
-                        <div className="flex justify-between font-bold pt-0.5">
-                          <span className="truncate">{mini.sec1Left}</span>
-                          <span className="font-normal shrink-0 ml-1">{mini.sec1Date}</span>
-                        </div>
-                        <p className="italic text-[8px] text-neutral-700 truncate">{mini.sec1Sub}</p>
+                          {/* Recipient (Kepada Yth. + Italic lines) & Date on right */}
+                          <div className="space-y-0.5 text-[8px] pt-1">
+                            <div className="flex justify-between items-baseline">
+                              <span className="font-bold">{mini.sec1Title}</span>
+                              <span className="text-[7.5px]">{mini.sec1Date}</span>
+                            </div>
+                            <p className="italic text-[7.5px] text-neutral-800 truncate">
+                              {mini.sec1Left}
+                            </p>
+                            <p className="italic text-[7.5px] text-neutral-800 truncate">
+                              {mini.sec1Sub}
+                            </p>
+                          </div>
 
-                        {/* Section 2 */}
-                        <p className="font-bold uppercase tracking-wide border-b border-black pb-0.5 pt-1 text-[8.5px]">
-                          {mini.sec2Title}
-                        </p>
-                        <ul className="list-disc pl-3.5 text-[8px] text-neutral-800 space-y-0.5 pt-0.5">
-                          {mini.bullets.map((b, i) => (
-                            <li key={i} className="leading-snug line-clamp-2">
-                              {b}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                          {/* Bold Subject Line & Open Circle Bullets (◦) */}
+                          <div className="space-y-0.5 text-[7.5px] pt-0.5">
+                            <p className="font-bold leading-snug line-clamp-2">{mini.sec2Title}</p>
+                            <p className="pt-0.5 text-neutral-800">Dengan hormat,</p>
+                            <ul className="list-[circle] pl-3.5 text-[7.5px] text-neutral-800 space-y-0.5 pt-0.5">
+                              {mini.bullets.map((b, i) => (
+                                <li key={i} className="leading-snug line-clamp-1">
+                                  {b}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* Header Block with Small-Caps simulation and optional single/double rule */}
+                          <div
+                            className={`text-center pb-1.5 ${
+                              preset.previewHeaderRule === 'single'
+                                ? 'border-b border-black'
+                                : preset.previewHeaderRule === 'double'
+                                  ? 'border-b-[3px] border-double border-black'
+                                  : ''
+                            }`}
+                          >
+                            <p className="font-bold tracking-wider text-[11px] uppercase">
+                              {mini.candidateName}
+                            </p>
+                            {mini.headline && (
+                              <p className="italic text-[8.5px] text-neutral-700">{mini.headline}</p>
+                            )}
+                            <p className="text-[7.5px] text-neutral-600 mt-0.5 truncate">
+                              {mini.contact}
+                            </p>
+                          </div>
+
+                          {/* Section 1 */}
+                          <div className="space-y-0.5 text-[8.5px]">
+                            <p
+                              className={`${
+                                preset.id === 'jakes' ? 'font-normal' : 'font-bold'
+                              } uppercase tracking-wide border-b border-black pb-0.5 text-[8.5px]`}
+                            >
+                              {mini.sec1Title}
+                            </p>
+                            <div className="flex justify-between font-bold pt-0.5">
+                              <span className="truncate">{mini.sec1Left}</span>
+                              <span className="font-normal shrink-0 ml-1">{mini.sec1Date}</span>
+                            </div>
+                            <p className="italic text-[8px] text-neutral-700 truncate">
+                              {mini.sec1Sub}
+                            </p>
+
+                            {/* Section 2 */}
+                            <p
+                              className={`${
+                                preset.id === 'jakes' ? 'font-normal' : 'font-bold'
+                              } uppercase tracking-wide border-b border-black pb-0.5 pt-1 text-[8.5px]`}
+                            >
+                              {mini.sec2Title}
+                            </p>
+                            <ul className="list-disc pl-3.5 text-[8px] text-neutral-800 space-y-0.5 pt-0.5">
+                              {mini.bullets.map((b, i) => (
+                                <li key={i} className="leading-snug line-clamp-2">
+                                  {b}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     {/* Hover Preview Overlay Button */}

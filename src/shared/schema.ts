@@ -176,7 +176,7 @@ export const HarvardLayoutSettingsSchema = z.object({
   fontSize: z.enum(['10pt', '10.5pt', '11pt', '11.5pt']).default('11pt'),
   margin: z.enum(['normal', 'narrow', 'compact']).default('normal'),
   sectionSpacing: z.enum(['compact', 'normal', 'relaxed']).default('normal'),
-  fontFamily: z.enum(['tgtermes', 'libertinus', 'ebgaramond']).default('tgtermes'),
+  fontFamily: z.enum(['lmodern', 'tgtermes', 'libertinus', 'ebgaramond']).default('tgtermes'),
   showLinksIcon: z.boolean().default(false),
   dateFormat: z.enum(['short', 'numeric', 'long']).default('short'),
   cvLanguage: z.enum(['id', 'en']).default('id'),

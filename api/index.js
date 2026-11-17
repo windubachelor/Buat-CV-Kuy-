@@ -2,20 +2,20 @@
 import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
-import fs2 from "fs";
+import fs3 from "fs";
 import helmet from "helmet";
-import path2 from "path";
+import path3 from "path";
 import pino from "pino";
 
 // src/server/compiler.ts
 import { spawn } from "child_process";
 import crypto from "crypto";
-import fs from "fs";
+import fs2 from "fs";
 import fsPromises from "fs/promises";
 import { LRUCache } from "lru-cache";
 import os from "os";
 import PQueue from "p-queue";
-import path from "path";
+import path2 from "path";
 import { PDFDocument as PDFDocument2 } from "pdf-lib";
 
 // src/shared/schema.ts
@@ -169,7 +169,7 @@ var HarvardLayoutSettingsSchema = z.object({
   fontSize: z.enum(["10pt", "10.5pt", "11pt", "11.5pt"]).default("11pt"),
   margin: z.enum(["normal", "narrow", "compact"]).default("normal"),
   sectionSpacing: z.enum(["compact", "normal", "relaxed"]).default("normal"),
-  fontFamily: z.enum(["tgtermes", "libertinus", "ebgaramond"]).default("tgtermes"),
+  fontFamily: z.enum(["lmodern", "tgtermes", "libertinus", "ebgaramond"]).default("tgtermes"),
   showLinksIcon: z.boolean().default(false),
   dateFormat: z.enum(["short", "numeric", "long"]).default("short"),
   cvLanguage: z.enum(["id", "en"]).default("id"),
@@ -584,28 +584,36 @@ ${enclosures.map((item) => `\\noindent ${escapeLatex(item)}\\par`).join("\n")}
 \\noindent\\textit{${escapeLatex(cl.postscript.trim())}}\\par` : "";
   if (preset === "cover_letter_1") {
     const senderRightLines = [
-      cv.personalInfo.location.trim() ? escapeLatex(cv.personalInfo.location.trim()) : "",
-      cv.personalInfo.phone.trim() ? escapeLatex(cv.personalInfo.phone.trim()) : "",
-      cv.personalInfo.email.trim() ? escapeLatex(cv.personalInfo.email.trim()) : ""
+      `\\textbf{${headerName}}`,
+      cv.personalInfo.location.trim() ? `\\textit{${escapeLatex(cv.personalInfo.location.trim())}}` : "",
+      cv.personalInfo.phone.trim() ? `\\textit{${escapeLatex(cv.personalInfo.phone.trim())}}` : "",
+      cv.personalInfo.email.trim() ? `\\textit{${escapeLatex(cv.personalInfo.email.trim())}}` : ""
     ].filter(Boolean);
+    const italicRecipientLines = [
+      cl.recipientName.trim() ? `\\textit{${escapeLatex(cl.recipientName.trim())}}` : "",
+      cl.recipientTitle.trim() ? `\\textit{${escapeLatex(cl.recipientTitle.trim())}}` : "",
+      cl.companyName.trim() ? `\\textit{${escapeLatex(cl.companyName.trim())}}` : "",
+      cl.companyAddress.trim() ? `\\textit{${escapeLatex(cl.companyAddress.trim())}}` : ""
+    ].filter(Boolean);
+    const circleFormattedParagraphs = formattedParagraphs.replace(
+      /\\begin\{itemize\}/g,
+      "\\begin{itemize}[label=$\\circ$]"
+    );
     return `% === SECTION: coverLetter ===
-\\noindent\\begin{tabular*}{\\textwidth}{@{\\extracolsep{\\fill}}lr@{}}
-  {\\LARGE\\bfseries ${headerName}} & {\\small ${senderRightLines[0] || ""}} \\\\
-  {\\small\\textit{${escapeLatex(cv.personalInfo.headline || "")}}} & {\\small ${senderRightLines.slice(1).join(" $\\cdot$ ")}}
-\\end{tabular*}
-\\vspace{4pt}
-\\noindent\\rule{\\textwidth}{0.75pt}
-\\vspace{12pt}
+\\begin{flushright}
+  ${senderRightLines.join("\\\\\n  ")}
+\\end{flushright}
+\\vspace{10pt}
 
 \\noindent\\textbf{${isId ? "Kepada Yth." : "To"}} \\hfill ${dateLine}\\\\
-${recipientLines.join("\\\\\n")}\\par
+${italicRecipientLines.join("\\\\\n")}\\par
 ${subjectBlock}\\vspace{10pt}
 \\noindent ${salutation}\\par
 \\vspace{8pt}
-${formattedParagraphs}
+${circleFormattedParagraphs}
 \\vspace{14pt}
 \\noindent ${signOff}\\par
-\\vspace{20pt}
+\\vspace{18pt}
 \\noindent\\textbf{${headerName}}\\par
 ${enclosureBlock}
 ${postscriptBlock}`;
@@ -672,7 +680,9 @@ function buildHarvardLatex(cv, mode = "cv") {
     marginIn = "0.52in";
   }
   let fontPackageLatex = "\\usepackage{tgtermes}";
-  if (settings.fontFamily === "libertinus") {
+  if (settings.fontFamily === "lmodern" || settings.templatePreset === "jakes" || settings.templatePreset === "cover_letter_1" || settings.templatePreset === "simple_letter") {
+    fontPackageLatex = "\\usepackage{lmodern}";
+  } else if (settings.fontFamily === "libertinus") {
     fontPackageLatex = "\\usepackage{libertinus}";
   } else if (settings.fontFamily === "ebgaramond") {
     fontPackageLatex = "\\usepackage{ebgaramond}";
@@ -1078,7 +1088,53 @@ ${documentBody}
 }
 
 // src/server/nativeHarvardPdfCompiler.ts
+import fs from "fs";
+import path from "path";
+import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+var cachedCmFonts = null;
+var CM_FONT_FILES = {
+  regular: "cmunrm.ttf",
+  bold: "cmunbx.ttf",
+  italic: "cmunti.ttf",
+  boldItalic: "cmunbi.ttf"
+};
+var CM_CDN_BASE = "https://cdn.jsdelivr.net/gh/dreampulse/computer-modern-web-font@master/font/Serif/";
+async function loadSingleCmFont(fileName) {
+  const candidatePaths = [
+    path.resolve(process.cwd(), "public", "fonts", fileName),
+    path.resolve(process.cwd(), "..", "public", "fonts", fileName)
+  ];
+  for (const candidate of candidatePaths) {
+    try {
+      if (fs.existsSync(candidate)) {
+        return new Uint8Array(fs.readFileSync(candidate));
+      }
+    } catch {
+    }
+  }
+  const res = await fetch(`${CM_CDN_BASE}${fileName}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Computer Modern font ${fileName}: ${res.status}`);
+  }
+  const arrayBuf = await res.arrayBuffer();
+  return new Uint8Array(arrayBuf);
+}
+async function getComputerModernFontBuffers() {
+  if (cachedCmFonts) return cachedCmFonts;
+  try {
+    const [regular, bold, italic, boldItalic] = await Promise.all([
+      loadSingleCmFont(CM_FONT_FILES.regular),
+      loadSingleCmFont(CM_FONT_FILES.bold),
+      loadSingleCmFont(CM_FONT_FILES.italic),
+      loadSingleCmFont(CM_FONT_FILES.boldItalic)
+    ]);
+    cachedCmFonts = { regular, bold, italic, boldItalic };
+    return cachedCmFonts;
+  } catch {
+    return null;
+  }
+}
 var MONTHS_ID_SHORT2 = [
   "Jan",
   "Feb",
@@ -1188,7 +1244,7 @@ function cleanDisplayUrl2(rawUrl) {
   return rawUrl.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/$/, "");
 }
 function parseRichTextSpans(raw) {
-  const cleaned = sanitizeWinAnsi(raw.trim().replace(/^[-•*]\s+/, "")).replace(/([^\s([{"'])\*\*([^*]+)\*\*/g, "$1 **$2**").replace(/\*\*([^*]+)\*\*([^\s.,;:!?)\]}"'])/g, "**$1** $2");
+  const cleaned = sanitizeWinAnsi(raw.trim().replace(/^[-•*◦]\s+/, "")).replace(/([^\s([{"'])\*\*([^*]+)\*\*/g, "$1 **$2**").replace(/\*\*([^*]+)\*\*([^\s.,;:!?)\]}"'])/g, "**$1** $2");
   if (!cleaned) return [];
   const spans = [];
   const tokenRegex = /(\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
@@ -1258,22 +1314,93 @@ function buildSmallCapsSegments(rawText, capSize, font, smallCapScale = 0.75) {
   const totalWidth = segments.reduce((acc, s) => acc + s.width, 0);
   return { segments, totalWidth };
 }
+function drawMobilePhoneIcon(page, x, yBaseline, size) {
+  const iconW = size * 0.52;
+  const iconH = size * 0.76;
+  const bottomY = yBaseline - size * 0.04;
+  page.drawRectangle({
+    x,
+    y: bottomY,
+    width: iconW,
+    height: iconH,
+    borderColor: rgb(0.12, 0.12, 0.12),
+    borderWidth: 0.75
+  });
+  page.drawRectangle({
+    x: x + iconW * 0.16,
+    y: bottomY + iconH * 0.22,
+    width: iconW * 0.68,
+    height: iconH * 0.62,
+    borderColor: rgb(0.12, 0.12, 0.12),
+    borderWidth: 0.45
+  });
+  page.drawCircle({
+    x: x + iconW / 2,
+    y: bottomY + iconH * 0.11,
+    size: iconW * 0.08,
+    color: rgb(0.12, 0.12, 0.12)
+  });
+}
+function drawEnvelopeIcon(page, x, yBaseline, size) {
+  const iconW = size * 0.74;
+  const iconH = size * 0.52;
+  const bottomY = yBaseline + size * 0.02;
+  const topY = bottomY + iconH;
+  const midX = x + iconW / 2;
+  const flapY = bottomY + iconH * 0.42;
+  page.drawRectangle({
+    x,
+    y: bottomY,
+    width: iconW,
+    height: iconH,
+    borderColor: rgb(0.12, 0.12, 0.12),
+    borderWidth: 0.75
+  });
+  page.drawLine({
+    start: { x, y: topY },
+    end: { x: midX, y: flapY },
+    thickness: 0.65,
+    color: rgb(0.12, 0.12, 0.12)
+  });
+  page.drawLine({
+    start: { x: x + iconW, y: topY },
+    end: { x: midX, y: flapY },
+    thickness: 0.65,
+    color: rgb(0.12, 0.12, 0.12)
+  });
+}
 async function compileHarvardVectorPdf(cv, mode = "cv") {
   const pdfDoc = await PDFDocument.create();
   pdfDoc.setTitle(sanitizeWinAnsi(cv.title || cv.personalInfo.fullName || "Harvard OCS Resume"));
   pdfDoc.setAuthor(sanitizeWinAnsi(cv.personalInfo.fullName || "Candidate"));
   pdfDoc.setCreator("Buat CV Kuy - Harvard LaTeX Engine");
-  const fontRegular = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
-  const fontItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
-  const fontBoldItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic);
   const { settings } = cv;
+  const useComputerModern = settings.fontFamily === "lmodern" || settings.templatePreset === "jakes" || settings.templatePreset === "cover_letter_1" || settings.templatePreset === "simple_letter";
+  let fontRegular;
+  let fontBold;
+  let fontItalic;
+  let fontBoldItalic;
+  const cmBuffers = useComputerModern ? await getComputerModernFontBuffers() : null;
+  if (cmBuffers) {
+    pdfDoc.registerFontkit(fontkit);
+    fontRegular = await pdfDoc.embedFont(cmBuffers.regular);
+    fontBold = await pdfDoc.embedFont(cmBuffers.bold);
+    fontItalic = await pdfDoc.embedFont(cmBuffers.italic);
+    fontBoldItalic = await pdfDoc.embedFont(cmBuffers.boldItalic);
+  } else {
+    fontRegular = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    fontItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+    fontBoldItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic);
+  }
   const isLetter = settings.paperSize === "letter";
   const pageWidth = isLetter ? 612 : 595.28;
   const pageHeight = isLetter ? 792 : 841.89;
   let marginIn = 0.72;
-  if (settings.margin === "compact" || settings.templatePreset === "jakes") {
-    marginIn = 0.45;
+  if (settings.templatePreset === "cover_letter_1") {
+    marginIn = 0.75;
+  } else if (settings.margin === "compact" || settings.templatePreset === "jakes") {
+    marginIn = 0.48;
   } else if (settings.margin === "narrow" || settings.templatePreset === "compact" || settings.templatePreset === "wharton" || settings.templatePreset === "mckinsey") {
     marginIn = 0.52;
   }
@@ -1281,13 +1408,13 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
   const baseSize = settings.fontSize === "10pt" ? 10 : settings.fontSize === "10.5pt" ? 10.5 : settings.fontSize === "11.5pt" ? 11.5 : 11;
   const isCompact = settings.sectionSpacing === "compact" || settings.templatePreset === "compact" || settings.templatePreset === "jakes" || settings.templatePreset === "wharton";
   const isRelaxed = settings.sectionSpacing === "relaxed";
-  const lineMultiplier = isCompact ? 1.11 : isRelaxed ? 1.21 : 1.15;
+  const lineMultiplier = isCompact ? 1.13 : isRelaxed ? 1.22 : 1.16;
   const lineHeight = Number((baseSize * lineMultiplier).toFixed(2));
-  const sectionBeforePt = isCompact ? 3.5 : isRelaxed ? 7.5 : 5;
-  const sectionAfterPt = isCompact ? 0.4 : isRelaxed ? 2.2 : 1;
-  const itemSepPt = isCompact ? 0.3 : isRelaxed ? 1.5 : 0.7;
-  const topSepPt = isCompact ? 0.2 : isRelaxed ? 1.5 : 0.6;
-  const entryGapPt = isCompact ? 2 : isRelaxed ? 4.5 : 3;
+  const sectionBeforePt = isCompact ? 4.2 : isRelaxed ? 7.5 : 5.5;
+  const sectionAfterPt = isCompact ? 1 : isRelaxed ? 2.5 : 1.5;
+  const itemSepPt = isCompact ? 0.5 : isRelaxed ? 1.5 : 0.8;
+  const topSepPt = isCompact ? 0.4 : isRelaxed ? 1.5 : 0.7;
+  const entryGapPt = isCompact ? 2.4 : isRelaxed ? 4.5 : 3.2;
   const contentWidth = pageWidth - marginPt * 2;
   const lang = settings.cvLanguage === "en" ? "en" : "id";
   const dateFormat = settings.dateFormat;
@@ -1305,7 +1432,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       cursorY = pageHeight - marginPt;
     }
   };
-  const drawSmallCapsAt = (text, xStart, yBaseline, capSize, font, smallCapScale = 0.74) => {
+  const drawSmallCapsAt = (text, xStart, yBaseline, capSize, font, smallCapScale = 0.75) => {
     const { segments } = buildSmallCapsSegments(text, capSize, font, smallCapScale);
     let x = xStart;
     for (const seg of segments) {
@@ -1319,7 +1446,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       x += seg.width;
     }
   };
-  const drawCenteredSmallCaps = (text, capSize, font, smallCapScale = 0.74) => {
+  const drawCenteredSmallCaps = (text, capSize, font, smallCapScale = 0.75) => {
     const { segments, totalWidth } = buildSmallCapsSegments(text, capSize, font, smallCapScale);
     if (segments.length === 0) return;
     ensureSpace(capSize * 1.15);
@@ -1335,7 +1462,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       });
       x += seg.width;
     }
-    cursorY = yBaseline - 2.5;
+    cursorY = yBaseline - 2.8;
   };
   const drawCenteredText = (text, size, font, color = rgb(0.04, 0.04, 0.04)) => {
     const safe = sanitizeWinAnsi(text);
@@ -1353,12 +1480,117 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
     });
     cursorY = yBaseline - 2.2;
   };
+  const drawRightAlignedRow = (text, font, size = baseSize, iconType) => {
+    const safe = sanitizeWinAnsi(text);
+    if (!safe) return;
+    ensureSpace(lineHeight);
+    const textWidth = font.widthOfTextAtSize(safe, size);
+    const textX = pageWidth - marginPt - textWidth;
+    const yBaseline = cursorY - size;
+    if (iconType === "phone") {
+      drawMobilePhoneIcon(currentPage, textX - size * 0.8, yBaseline, size);
+    } else if (iconType === "email") {
+      drawEnvelopeIcon(currentPage, textX - size * 1, yBaseline, size);
+    }
+    currentPage.drawText(safe, {
+      x: textX,
+      y: yBaseline,
+      size,
+      font,
+      color: rgb(0, 0, 0)
+    });
+    cursorY -= Number((size * 1.22).toFixed(2));
+  };
   const drawHeaderBlock = () => {
     const p = cv.personalInfo;
-    const headerCapSize = settings.templatePreset === "academic" ? baseSize + 6 : baseSize + 8.5;
-    drawCenteredSmallCaps(p.fullName || "Nama Lengkap", headerCapSize, fontBold, 0.74);
-    if (p.headline && p.headline.trim()) {
+    const isJakes = settings.templatePreset === "jakes";
+    const headerCapSize = settings.templatePreset === "academic" ? baseSize + 6 : isJakes ? baseSize + 10.5 : baseSize + 8.5;
+    drawCenteredSmallCaps(p.fullName || "Nama Lengkap", headerCapSize, fontBold, 0.75);
+    if (!isJakes && p.headline && p.headline.trim()) {
       drawCenteredText(p.headline.trim(), baseSize, fontItalic, rgb(0.08, 0.08, 0.08));
+    }
+    if (isJakes) {
+      const jakeContacts = [];
+      if (p.phone?.trim()) {
+        jakeContacts.push({ text: sanitizeWinAnsi(p.phone.trim()) });
+      }
+      if (p.location?.trim() && !p.phone?.trim()) {
+        jakeContacts.push({ text: sanitizeWinAnsi(p.location.trim()) });
+      }
+      if (p.email?.trim()) {
+        jakeContacts.push({ text: sanitizeWinAnsi(p.email.trim()), underline: true });
+      }
+      if (p.linkedin?.trim()) {
+        jakeContacts.push({
+          text: sanitizeWinAnsi(cleanDisplayUrl2(p.linkedin)),
+          underline: true
+        });
+      }
+      if (p.github?.trim()) {
+        jakeContacts.push({
+          text: sanitizeWinAnsi(cleanDisplayUrl2(p.github)),
+          underline: true
+        });
+      }
+      if (p.portfolio?.trim()) {
+        jakeContacts.push({
+          text: sanitizeWinAnsi(cleanDisplayUrl2(p.portfolio)),
+          underline: true
+        });
+      }
+      for (const custom of p.customLinks || []) {
+        if (custom.url?.trim() || custom.label?.trim()) {
+          jakeContacts.push({
+            text: sanitizeWinAnsi(custom.label?.trim() || cleanDisplayUrl2(custom.url)),
+            underline: true
+          });
+        }
+      }
+      if (jakeContacts.length > 0) {
+        const contactSize = baseSize - 1;
+        const sep = " | ";
+        const sepW = fontRegular.widthOfTextAtSize(sep, contactSize);
+        const totalW = jakeContacts.reduce(
+          (acc, c) => acc + fontRegular.widthOfTextAtSize(c.text, contactSize),
+          0
+        ) + sepW * (jakeContacts.length - 1);
+        ensureSpace(contactSize * 1.2);
+        const yBaseline = cursorY - contactSize * 0.85;
+        let x = Math.max(marginPt, (pageWidth - totalW) / 2);
+        for (let i = 0; i < jakeContacts.length; i++) {
+          const item = jakeContacts[i];
+          const w = fontRegular.widthOfTextAtSize(item.text, contactSize);
+          currentPage.drawText(item.text, {
+            x,
+            y: yBaseline,
+            size: contactSize,
+            font: fontRegular,
+            color: rgb(0, 0, 0)
+          });
+          if (item.underline) {
+            currentPage.drawRectangle({
+              x,
+              y: yBaseline - 1.1,
+              width: w,
+              height: 0.42,
+              color: rgb(0, 0, 0)
+            });
+          }
+          x += w;
+          if (i < jakeContacts.length - 1) {
+            currentPage.drawText(sep, {
+              x,
+              y: yBaseline,
+              size: contactSize,
+              font: fontRegular,
+              color: rgb(0, 0, 0)
+            });
+            x += sepW;
+          }
+        }
+        cursorY = yBaseline - 2;
+      }
+      return;
     }
     const contacts = [];
     if (p.location?.trim()) contacts.push(sanitizeWinAnsi(p.location.trim()));
@@ -1384,8 +1616,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       }
     }
     if (contacts.length > 0) {
-      const sep = settings.templatePreset === "jakes" ? "   |   " : "   \xB7   ";
-      const contactLine = contacts.join(sep);
+      const contactLine = contacts.join("   \xB7   ");
       drawCenteredText(contactLine, baseSize - 0.9, fontRegular, rgb(0.06, 0.06, 0.06));
     }
     if (settings.templatePreset === "wharton") {
@@ -1421,28 +1652,31 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
     }
   };
   const drawSectionHeading = (title) => {
-    const headingCapSize = baseSize + 1.2;
+    const isJakes = settings.templatePreset === "jakes";
+    const headingCapSize = baseSize + 1.4;
     ensureSpace(sectionBeforePt + headingCapSize + sectionAfterPt + lineHeight * 2);
     cursorY -= sectionBeforePt;
     const yBaseline = cursorY - headingCapSize * 0.85;
-    drawSmallCapsAt(title, marginPt, yBaseline, headingCapSize, fontBold, 0.74);
-    const ruleY = yBaseline - 2;
+    const sectionFont = isJakes ? fontRegular : fontBold;
+    drawSmallCapsAt(title, marginPt, yBaseline, headingCapSize, sectionFont, 0.75);
+    const ruleY = yBaseline - 2.2;
     currentPage.drawRectangle({
       x: marginPt,
       y: ruleY,
       width: contentWidth,
-      height: 0.55,
+      height: 0.52,
       color: rgb(0, 0, 0)
     });
     cursorY = ruleY - sectionAfterPt;
   };
-  const drawTwoColRow = (leftText, rightText, leftFont, rightFont, size = baseSize) => {
+  const drawTwoColRow = (leftText, rightText, leftFont, rightFont, size = baseSize, leftIndentPt = 0) => {
     const safeLeft = sanitizeWinAnsi(leftText);
     const safeRight = sanitizeWinAnsi(rightText);
     if (!safeLeft && !safeRight) return;
-    ensureSpace(lineHeight);
+    const rowH = Number((size * lineMultiplier).toFixed(2));
+    ensureSpace(rowH);
     const rightWidth = safeRight ? rightFont.widthOfTextAtSize(safeRight, size) : 0;
-    const maxLeftWidth = Math.max(120, contentWidth - rightWidth - 12);
+    const maxLeftWidth = Math.max(120, contentWidth - leftIndentPt - rightWidth - 12);
     let displayLeft = safeLeft;
     while (displayLeft.length > 10 && leftFont.widthOfTextAtSize(displayLeft, size) > maxLeftWidth) {
       displayLeft = `${displayLeft.slice(0, -4)}...`;
@@ -1450,7 +1684,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
     const yBaseline = cursorY - size;
     if (displayLeft) {
       currentPage.drawText(displayLeft, {
-        x: marginPt,
+        x: marginPt + leftIndentPt,
         y: yBaseline,
         size,
         font: leftFont,
@@ -1466,12 +1700,57 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
         color: rgb(0, 0, 0)
       });
     }
-    cursorY -= lineHeight;
+    cursorY -= rowH;
+  };
+  const drawMixedLeftTwoColRow = (leftSpans, rightText, rightFont, size = baseSize, leftIndentPt = 0) => {
+    const safeRight = sanitizeWinAnsi(rightText);
+    const rowH = Number((size * lineMultiplier).toFixed(2));
+    ensureSpace(rowH);
+    const yBaseline = cursorY - size;
+    let x = marginPt + leftIndentPt;
+    for (const span of leftSpans) {
+      const text = sanitizeWinAnsi(span.text);
+      if (!text) continue;
+      const hasLeadSpace = /^\s/.test(span.text);
+      const hasTrailSpace = /\s$/.test(span.text);
+      const rendered = `${hasLeadSpace ? " " : ""}${text}${hasTrailSpace ? " " : ""}`;
+      const f = pickFont(span.bold, span.italic);
+      const w = f.widthOfTextAtSize(rendered, size);
+      currentPage.drawText(rendered, {
+        x,
+        y: yBaseline,
+        size,
+        font: f,
+        color: rgb(0, 0, 0)
+      });
+      if (span.underline) {
+        currentPage.drawRectangle({
+          x,
+          y: yBaseline - 1.1,
+          width: w,
+          height: 0.42,
+          color: rgb(0, 0, 0)
+        });
+      }
+      x += w;
+    }
+    if (safeRight) {
+      const rightWidth = rightFont.widthOfTextAtSize(safeRight, size);
+      currentPage.drawText(safeRight, {
+        x: pageWidth - marginPt - rightWidth,
+        y: yBaseline,
+        size,
+        font: rightFont,
+        color: rgb(0, 0, 0)
+      });
+    }
+    cursorY -= rowH;
   };
   const drawRichParagraph = (spans, options) => {
     const size = options?.size ?? baseSize;
     const indentPt = options?.indentPt ?? 0;
-    const bulletChar = options?.bulletChar;
+    const bulletStyle = options?.bulletStyle;
+    const bulletOffsetPt = options?.bulletOffsetPt ?? 4;
     const justify = options?.justify ?? true;
     const rowHeight = Number((size * (options?.lineGapMultiplier ?? lineMultiplier)).toFixed(2));
     const availWidth = contentWidth - indentPt;
@@ -1529,14 +1808,23 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
       ensureSpace(rowHeight);
       const yPos = cursorY - size;
-      if (lineIdx === 0 && bulletChar) {
-        currentPage.drawText(bulletChar, {
-          x: marginPt + 4,
-          y: yPos + 0.3,
-          size: size * 0.88,
-          font: fontBold,
-          color: rgb(0, 0, 0)
-        });
+      if (lineIdx === 0 && bulletStyle) {
+        if (bulletStyle === "circle") {
+          currentPage.drawCircle({
+            x: marginPt + bulletOffsetPt + 2.2,
+            y: yPos + size * 0.28,
+            size: 1.75,
+            borderColor: rgb(0, 0, 0),
+            borderWidth: 0.7
+          });
+        } else {
+          currentPage.drawCircle({
+            x: marginPt + bulletOffsetPt + 2,
+            y: yPos + size * 0.28,
+            size: 1.55,
+            color: rgb(0, 0, 0)
+          });
+        }
       }
       const lineTokens = lines[lineIdx] ?? [];
       const isLastLine = lineIdx === lines.length - 1;
@@ -1572,18 +1860,22 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       cursorY -= rowHeight;
     }
   };
-  const drawBullets = (bullets) => {
+  const drawBullets = (bullets, options) => {
     const nonEmpty = bullets.map((b) => b.trim()).filter(Boolean);
     if (nonEmpty.length === 0) return;
+    const bSize = options?.size ?? baseSize;
+    const extraIndent = options?.extraIndentPt ?? 0;
+    const bStyle = options?.bulletStyle ?? "solid";
     cursorY -= topSepPt;
     for (let i = 0; i < nonEmpty.length; i++) {
       const b = nonEmpty[i];
       const spans = parseRichTextSpans(b);
       if (spans.length > 0) {
         drawRichParagraph(spans, {
-          indentPt: baseSize * 1.35,
-          bulletChar: "\u2022",
-          // True round bullet •
+          indentPt: extraIndent + bSize * 1.35,
+          bulletStyle: bStyle,
+          bulletOffsetPt: extraIndent + 3.5,
+          size: bSize,
           justify: true
         });
         if (i < nonEmpty.length - 1) {
@@ -1611,34 +1903,121 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
       cl.date?.trim() || (lang === "id" ? "17 November 2026" : "November 17, 2026")
     );
     if (preset === "cover_letter_1") {
-      const rightTop = p.location?.trim() || "";
-      const rightBottom = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(" \xB7 ");
-      drawTwoColRow(p.fullName || "Nama Lengkap", rightTop, fontBold, fontRegular, baseSize + 3.5);
-      if (p.headline?.trim() || rightBottom) {
-        drawTwoColRow(p.headline?.trim() || "", rightBottom, fontItalic, fontRegular, baseSize - 0.8);
-      }
-      cursorY -= 2;
-      currentPage.drawRectangle({
-        x: marginPt,
-        y: cursorY,
-        width: contentWidth,
-        height: 0.75,
-        color: rgb(0, 0, 0)
-      });
-      cursorY -= 12;
-      drawTwoColRow(lang === "id" ? "Kepada Yth." : "To", dateLine, fontBold, fontRegular);
-    } else if (preset === "simple_letter") {
-      drawTwoColRow("", p.fullName || "Nama Lengkap", fontRegular, fontBold);
+      drawRightAlignedRow(p.fullName || "Nama Lengkap", fontBold, baseSize);
       if (p.location?.trim()) {
-        drawTwoColRow("", p.location.trim(), fontRegular, fontRegular, baseSize - 0.5);
+        drawRightAlignedRow(p.location.trim(), fontItalic, baseSize);
       }
-      const contactPair = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(" \xB7 ");
-      if (contactPair) {
-        drawTwoColRow("", contactPair, fontRegular, fontRegular, baseSize - 0.5);
+      if (p.phone?.trim()) {
+        drawRightAlignedRow(p.phone.trim(), fontItalic, baseSize, "phone");
       }
-      cursorY -= 6;
-      drawTwoColRow("", dateLine, fontRegular, fontRegular);
+      if (p.email?.trim()) {
+        drawRightAlignedRow(p.email.trim(), fontItalic, baseSize, "email");
+      }
+      cursorY -= 14;
+      drawTwoColRow(lang === "id" ? "Kepada Yth." : "To", dateLine, fontBold, fontRegular, baseSize);
+      const recLines = [
+        cl.recipientName?.trim(),
+        cl.recipientTitle?.trim(),
+        cl.companyName?.trim(),
+        cl.companyAddress?.trim()
+      ].filter((line) => Boolean(line));
+      for (const rLine of recLines) {
+        drawRichParagraph([{ text: sanitizeWinAnsi(rLine), italic: true }], {
+          justify: false,
+          lineGapMultiplier: 1.18
+        });
+      }
+      cursorY -= 16;
+      if (cl.subjectLine?.trim()) {
+        const prefix = lang === "id" ? "Perihal: " : "Sub: ";
+        const rawSub = cl.subjectLine.trim();
+        const hasPrefix = rawSub.toLowerCase().startsWith("perihal") || rawSub.toLowerCase().startsWith("sub:") || rawSub.toLowerCase().startsWith("re:");
+        const fullSubject = hasPrefix ? rawSub : `${prefix}${rawSub}`;
+        drawRichParagraph([{ text: sanitizeWinAnsi(fullSubject), bold: true }], {
+          justify: false,
+          lineGapMultiplier: 1.2
+        });
+        cursorY -= 14;
+      }
+      const salutation2 = cl.salutation?.trim() || (lang === "id" ? "Dengan hormat," : "Respected Sir,");
+      drawRichParagraph([{ text: sanitizeWinAnsi(salutation2) }], { justify: false });
       cursorY -= 10;
+      const paragraphs2 = [
+        cl.openingParagraph,
+        ...cl.bodyParagraphs || [],
+        cl.closingParagraph
+      ].map((pItem) => pItem?.trim()).filter((pItem) => Boolean(pItem));
+      for (const para of paragraphs2) {
+        const lines = para.split("\n").map((l) => l.trim()).filter(Boolean);
+        const bulletLines = lines.filter((l) => /^[•\-*◦]\s+/.test(l));
+        if (bulletLines.length > 0) {
+          const introLines = lines.filter((l) => !/^[•\-*◦]\s+/.test(l));
+          if (introLines.length > 0) {
+            drawRichParagraph(parseRichTextSpans(introLines.join(" ")), {
+              lineGapMultiplier: 1.22,
+              justify: false
+            });
+            cursorY -= 4;
+          }
+          drawBullets(
+            bulletLines.map((b) => b.replace(/^[•\-*◦]\s+/, "")),
+            {
+              bulletStyle: "circle",
+              extraIndentPt: 4
+            }
+          );
+          cursorY -= 8;
+        } else {
+          const subParas = para.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+          for (const sp of subParas) {
+            drawRichParagraph(parseRichTextSpans(sp), {
+              lineGapMultiplier: 1.22,
+              justify: false
+            });
+            cursorY -= 9;
+          }
+        }
+      }
+      cursorY -= 4;
+      const signOff2 = cl.signOff?.trim() || (lang === "id" ? "Hormat saya," : "Yours faithfully,");
+      drawRichParagraph([{ text: sanitizeWinAnsi(signOff2) }], { justify: false });
+      cursorY -= 16;
+      drawRichParagraph(
+        [{ text: sanitizeWinAnsi(cv.personalInfo.fullName || "Candidate"), bold: true }],
+        { justify: false }
+      );
+      const enclosures2 = (cl.enclosures || []).map((e) => e.trim()).filter(Boolean);
+      if (enclosures2.length > 0) {
+        cursorY -= 12;
+        const encTitle = lang === "id" ? "Lampiran (Berkas / Sertifikat Terlampir):" : "Enclosed (Marksheets / Certificates):";
+        drawRichParagraph([{ text: encTitle, bold: true }], {
+          size: baseSize - 0.5,
+          justify: false
+        });
+        cursorY -= 2;
+        for (const item of enclosures2) {
+          drawRichParagraph([{ text: sanitizeWinAnsi(item) }], {
+            size: baseSize - 0.8,
+            justify: false
+          });
+        }
+      }
+      return;
+    }
+    if (preset === "simple_letter") {
+      drawRightAlignedRow(p.fullName || "Nama Lengkap", fontBold, baseSize);
+      if (p.location?.trim()) {
+        drawRightAlignedRow(p.location.trim(), fontRegular, baseSize);
+      }
+      if (p.phone?.trim()) {
+        drawRightAlignedRow(p.phone.trim(), fontRegular, baseSize);
+      }
+      if (p.email?.trim()) {
+        drawRightAlignedRow(p.email.trim(), fontRegular, baseSize);
+      }
+      cursorY -= 8;
+      drawRightAlignedRow(dateLine, fontRegular, baseSize);
+      cursorY -= 12;
     } else {
       drawHeaderBlock();
       currentPage.drawRectangle({
@@ -1687,9 +2066,9 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
     ].map((pItem) => pItem?.trim()).filter((pItem) => Boolean(pItem));
     for (const para of paragraphs) {
       const lines = para.split("\n").map((l) => l.trim()).filter(Boolean);
-      const bulletLines = lines.filter((l) => /^[•\-*]\s+/.test(l));
+      const bulletLines = lines.filter((l) => /^[•\-*◦]\s+/.test(l));
       if (bulletLines.length > 0) {
-        const introLines = lines.filter((l) => !/^[•\-*]\s+/.test(l));
+        const introLines = lines.filter((l) => !/^[•\-*◦]\s+/.test(l));
         if (introLines.length > 0) {
           drawRichParagraph(parseRichTextSpans(introLines.join(" ")), {
             lineGapMultiplier: 1.24,
@@ -1697,7 +2076,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
           });
           cursorY -= 3;
         }
-        drawBullets(bulletLines.map((b) => b.replace(/^[•\-*]\s+/, "")));
+        drawBullets(bulletLines.map((b) => b.replace(/^[•\-*◦]\s+/, "")));
         cursorY -= 6;
       } else {
         const subParas = para.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
@@ -1742,13 +2121,19 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
   const renderCVBody = () => {
     drawHeaderBlock();
     const defaultLabels = SECTION_LABELS2[lang];
+    const isJakes = settings.templatePreset === "jakes";
+    const jakesIndentPt = isJakes ? 7 : 0;
+    const jakesSubSize = isJakes ? baseSize - 0.8 : baseSize;
     const renderSectionByKey = (key, customTitle) => {
-      const sectionHeadingText = customTitle?.trim() || defaultLabels[key];
+      const sectionHeadingText = customTitle?.trim() || (isJakes && key === "projects" && lang === "en" ? "Projects" : isJakes && key === "skills" && lang === "en" ? "Technical Skills" : defaultLabels[key]);
       switch (key) {
         case "summary": {
           if (!cv.summary?.content?.trim()) return;
           drawSectionHeading(sectionHeadingText);
-          drawRichParagraph(parseRichTextSpans(cv.summary.content.trim()), { justify: true });
+          drawRichParagraph(parseRichTextSpans(cv.summary.content.trim()), {
+            indentPt: jakesIndentPt,
+            justify: true
+          });
           cursorY -= 2;
           break;
         }
@@ -1761,13 +2146,28 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
           for (let idx = 0; idx < validEdu.length; idx++) {
             const item = validEdu[idx];
             const degLine = [item.degree.trim(), item.fieldOfStudy.trim()].filter(Boolean).join(", ");
-            drawTwoColRow(item.institution, item.location, fontBold, fontItalic);
-            drawTwoColRow(
-              degLine,
-              drawDateRange(item.startDate, item.endDate, item.isCurrent),
-              fontItalic,
-              fontRegular
-            );
+            const dateStr = drawDateRange(item.startDate, item.endDate, item.isCurrent);
+            if (isJakes) {
+              drawTwoColRow(
+                item.institution,
+                item.location,
+                fontBold,
+                fontRegular,
+                baseSize,
+                jakesIndentPt
+              );
+              drawTwoColRow(
+                degLine,
+                dateStr,
+                fontItalic,
+                fontItalic,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.institution, item.location, fontBold, fontItalic);
+              drawTwoColRow(degLine, dateStr, fontItalic, fontRegular);
+            }
             const extraBullets = [];
             if (item.gpa?.trim() || item.honors?.trim()) {
               const parts = [];
@@ -1787,7 +2187,10 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
               const thLabel = lang === "id" ? "*Tesis/Skripsi*:" : "*Thesis*:";
               extraBullets.push(`${thLabel} ${item.thesis.trim()}`);
             }
-            drawBullets([...extraBullets, ...item.bullets]);
+            drawBullets([...extraBullets, ...item.bullets], {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt
+            });
             if (idx < validEdu.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -1802,14 +2205,32 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
           drawSectionHeading(sectionHeadingText);
           for (let idx = 0; idx < validExp.length; idx++) {
             const item = validExp[idx];
-            drawTwoColRow(item.company, item.location, fontBold, fontItalic);
-            drawTwoColRow(
-              item.position,
-              drawDateRange(item.startDate, item.endDate, item.isCurrent),
-              fontItalic,
-              fontRegular
-            );
-            drawBullets(item.bullets);
+            const dateStr = drawDateRange(item.startDate, item.endDate, item.isCurrent);
+            if (isJakes) {
+              drawTwoColRow(
+                item.position || item.company,
+                dateStr,
+                fontBold,
+                fontRegular,
+                baseSize,
+                jakesIndentPt
+              );
+              drawTwoColRow(
+                item.position ? item.company : "",
+                item.location,
+                fontItalic,
+                fontItalic,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.company, item.location, fontBold, fontItalic);
+              drawTwoColRow(item.position, dateStr, fontItalic, fontRegular);
+            }
+            drawBullets(item.bullets, {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt
+            });
             if (idx < validExp.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -1824,14 +2245,32 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
           drawSectionHeading(sectionHeadingText);
           for (let idx = 0; idx < validLead.length; idx++) {
             const item = validLead[idx];
-            drawTwoColRow(item.organization, item.location, fontBold, fontItalic);
-            drawTwoColRow(
-              item.role,
-              drawDateRange(item.startDate, item.endDate, item.isCurrent),
-              fontItalic,
-              fontRegular
-            );
-            drawBullets(item.bullets);
+            const dateStr = drawDateRange(item.startDate, item.endDate, item.isCurrent);
+            if (isJakes) {
+              drawTwoColRow(
+                item.role || item.organization,
+                dateStr,
+                fontBold,
+                fontRegular,
+                baseSize,
+                jakesIndentPt
+              );
+              drawTwoColRow(
+                item.role ? item.organization : "",
+                item.location,
+                fontItalic,
+                fontItalic,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.organization, item.location, fontBold, fontItalic);
+              drawTwoColRow(item.role, dateStr, fontItalic, fontRegular);
+            }
+            drawBullets(item.bullets, {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt
+            });
             if (idx < validLead.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -1846,11 +2285,29 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
             const item = validProj[idx];
             const linkText = item.link?.trim() ? cleanDisplayUrl2(item.link) : "";
             const dateStr = drawDateRange(item.startDate, item.endDate, false);
-            drawTwoColRow(item.name, linkText, fontBold, fontRegular);
-            if (item.techStack?.trim() || dateStr) {
-              drawTwoColRow(item.techStack?.trim() || "", dateStr, fontItalic, fontRegular);
+            if (isJakes) {
+              const leftSpans = [{ text: item.name.trim(), bold: true }];
+              if (item.techStack?.trim()) {
+                leftSpans.push({ text: " | " });
+                leftSpans.push({ text: item.techStack.trim(), italic: true });
+              }
+              drawMixedLeftTwoColRow(
+                leftSpans,
+                dateStr || linkText,
+                fontRegular,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.name, linkText, fontBold, fontRegular);
+              if (item.techStack?.trim() || dateStr) {
+                drawTwoColRow(item.techStack?.trim() || "", dateStr, fontItalic, fontRegular);
+              }
             }
-            drawBullets(item.bullets);
+            drawBullets(item.bullets, {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt
+            });
             if (idx < validProj.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -1877,10 +2334,12 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
                 leftSpans.map((s) => s.text).join(""),
                 dateStr,
                 fontBold,
-                fontRegular
+                fontRegular,
+                baseSize,
+                jakesIndentPt
               );
             } else {
-              drawRichParagraph(leftSpans, { justify: false });
+              drawRichParagraph(leftSpans, { indentPt: jakesIndentPt, justify: false });
             }
             cursorY -= 1.5;
           }
@@ -1897,7 +2356,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
               item.issuer?.trim() ? `\u2013 ${item.issuer.trim()}` : "",
               item.credentialId?.trim() ? `(${item.credentialId.trim()})` : ""
             ].filter(Boolean).join(" ");
-            drawTwoColRow(left, dateStr, fontBold, fontRegular);
+            drawTwoColRow(left, dateStr, fontBold, fontRegular, baseSize, jakesIndentPt);
             cursorY -= 1.5;
           }
           break;
@@ -1919,7 +2378,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
             if (dateStr) {
               spans.push({ text: `${dateStr}.` });
             }
-            drawRichParagraph(spans, { justify: true });
+            drawRichParagraph(spans, { indentPt: jakesIndentPt, justify: true });
             cursorY -= 2.5;
           }
           break;
@@ -1929,6 +2388,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
           const hasAny = s.categories.some((c) => c.category.trim() && c.items.trim()) || s.languages.some((l) => l.language.trim()) || Boolean(s.interests?.trim());
           if (!hasAny) return;
           drawSectionHeading(sectionHeadingText);
+          const skillSize = isJakes ? jakesSubSize : baseSize;
           for (const cat of s.categories) {
             if (!cat.category?.trim() || !cat.items?.trim()) continue;
             drawRichParagraph(
@@ -1936,9 +2396,9 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
                 { text: `${sanitizeWinAnsi(cat.category.trim())}: `, bold: true },
                 { text: sanitizeWinAnsi(cat.items.trim()) }
               ],
-              { justify: false }
+              { indentPt: jakesIndentPt, size: skillSize, justify: false }
             );
-            cursorY -= 1.5;
+            cursorY -= 1.2;
           }
           const validLangs = s.languages.filter((l) => l.language.trim());
           if (validLangs.length > 0) {
@@ -1951,9 +2411,9 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
                 { text: lbl, bold: true },
                 { text: sanitizeWinAnsi(langItems) }
               ],
-              { justify: false }
+              { indentPt: jakesIndentPt, size: skillSize, justify: false }
             );
-            cursorY -= 1.5;
+            cursorY -= 1.2;
           }
           if (s.interests?.trim()) {
             const lbl = lang === "id" ? "Minat: " : "Interests: ";
@@ -1962,7 +2422,7 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
                 { text: lbl, bold: true },
                 { text: sanitizeWinAnsi(s.interests.trim()) }
               ],
-              { justify: false }
+              { indentPt: jakesIndentPt, size: skillSize, justify: false }
             );
           }
           break;
@@ -1975,11 +2435,28 @@ async function compileHarvardVectorPdf(cv, mode = "cv") {
             drawSectionHeading(sec.sectionTitle.trim());
             for (let idx = 0; idx < validEntries.length; idx++) {
               const entry = validEntries[idx];
-              drawTwoColRow(entry.title, entry.location, fontBold, fontItalic);
+              drawTwoColRow(
+                entry.title,
+                entry.location,
+                fontBold,
+                fontItalic,
+                baseSize,
+                jakesIndentPt
+              );
               if (entry.subtitle?.trim() || entry.date?.trim()) {
-                drawTwoColRow(entry.subtitle, entry.date, fontItalic, fontRegular);
+                drawTwoColRow(
+                  entry.subtitle,
+                  entry.date,
+                  fontItalic,
+                  fontRegular,
+                  jakesSubSize,
+                  jakesIndentPt
+                );
               }
-              drawBullets(entry.bullets);
+              drawBullets(entry.bullets, {
+                size: jakesSubSize,
+                extraIndentPt: jakesIndentPt
+              });
               if (idx < validEntries.length - 1) {
                 cursorY -= entryGapPt;
               }
@@ -2025,13 +2502,13 @@ var bootstrapPromise = null;
 var warmupPromise = null;
 var TECTONIC_MUSL_URL = "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-unknown-linux-musl.tar.gz";
 function resolveCandidateBins() {
-  const localTectonic = path.resolve(process.cwd(), "bin", "tectonic");
-  const tmpTectonic = path.join(os.tmpdir(), "tectonic");
+  const localTectonic = path2.resolve(process.cwd(), "bin", "tectonic");
+  const tmpTectonic = path2.join(os.tmpdir(), "tectonic");
   const candidates = [];
   for (const candidatePath of [localTectonic, tmpTectonic]) {
-    if (fs.existsSync(candidatePath)) {
+    if (fs2.existsSync(candidatePath)) {
       try {
-        fs.chmodSync(candidatePath, 493);
+        fs2.chmodSync(candidatePath, 493);
       } catch {
       }
       candidates.push({ name: "tectonic", bin: candidatePath });
@@ -2074,18 +2551,18 @@ async function bootstrapTectonicBinary() {
   if (process.platform !== "linux" || process.env.VERCEL) return null;
   if (bootstrapPromise) return bootstrapPromise;
   bootstrapPromise = (async () => {
-    const localBinDir = path.resolve(process.cwd(), "bin");
+    const localBinDir = path2.resolve(process.cwd(), "bin");
     let targetDir = localBinDir;
     try {
       await fsPromises.mkdir(localBinDir, { recursive: true });
-      fs.accessSync(localBinDir, fs.constants.W_OK);
+      fs2.accessSync(localBinDir, fs2.constants.W_OK);
     } catch {
       targetDir = os.tmpdir();
     }
-    const targetBin = path.join(targetDir, "tectonic");
-    if (fs.existsSync(targetBin)) {
+    const targetBin = path2.join(targetDir, "tectonic");
+    if (fs2.existsSync(targetBin)) {
       try {
-        fs.chmodSync(targetBin, 493);
+        fs2.chmodSync(targetBin, 493);
       } catch {
       }
       return targetBin;
@@ -2103,7 +2580,7 @@ async function bootstrapTectonicBinary() {
       });
       child.on("close", (code) => {
         clearTimeout(timer);
-        if (code === 0 && fs.existsSync(targetBin)) {
+        if (code === 0 && fs2.existsSync(targetBin)) {
           resolve(targetBin);
         } else {
           resolve(null);
@@ -2123,7 +2600,7 @@ async function detectLatexEngine() {
       version: "Harvard OCS Server Vector TeX Engine 1.0 (Type-1 PostScript)"
     };
   }
-  if (cachedEngineInfo && cachedEngineInfo.name !== "none" && cachedEngineInfo.binPath !== "internal" && fs.existsSync(cachedEngineInfo.binPath)) {
+  if (cachedEngineInfo && cachedEngineInfo.name !== "none" && cachedEngineInfo.binPath !== "internal" && fs2.existsSync(cachedEngineInfo.binPath)) {
     return cachedEngineInfo;
   }
   for (const candidate of resolveCandidateBins()) {
@@ -2180,16 +2657,16 @@ function parseLatexLog(rawLog) {
 }
 function hasFmtFiles(dir) {
   try {
-    return fs.existsSync(dir) && fs.readdirSync(dir).some((f) => f.endsWith(".fmt"));
+    return fs2.existsSync(dir) && fs2.readdirSync(dir).some((f) => f.endsWith(".fmt"));
   } catch {
     return false;
   }
 }
 function resolveWritableCacheEnv() {
   const defaultHome = process.env.HOME || "/root";
-  const workspaceCacheDir = path.resolve(process.cwd(), ".cache");
-  const rootCacheDir = path.join(defaultHome, ".cache");
-  const tmpCacheDir = path.join(os.tmpdir(), "tectonic-cache");
+  const workspaceCacheDir = path2.resolve(process.cwd(), ".cache");
+  const rootCacheDir = path2.join(defaultHome, ".cache");
+  const tmpCacheDir = path2.join(os.tmpdir(), "tectonic-cache");
   if (!process.env.VERCEL) {
     for (const candidateCache of [
       workspaceCacheDir,
@@ -2197,23 +2674,23 @@ function resolveWritableCacheEnv() {
       "/tmp/empty_cache",
       tmpCacheDir
     ]) {
-      const fmtDir = path.join(candidateCache, "Tectonic", "formats");
+      const fmtDir = path2.join(candidateCache, "Tectonic", "formats");
       if (hasFmtFiles(fmtDir)) {
         return { home: defaultHome, xdgCache: candidateCache, isWarm: true };
       }
     }
     try {
-      fs.mkdirSync(workspaceCacheDir, { recursive: true });
-      fs.accessSync(workspaceCacheDir, fs.constants.W_OK);
+      fs2.mkdirSync(workspaceCacheDir, { recursive: true });
+      fs2.accessSync(workspaceCacheDir, fs2.constants.W_OK);
       return { home: defaultHome, xdgCache: workspaceCacheDir, isWarm: false };
     } catch {
     }
   }
   try {
-    fs.mkdirSync(tmpCacheDir, { recursive: true });
+    fs2.mkdirSync(tmpCacheDir, { recursive: true });
   } catch {
   }
-  const tmpWarm = hasFmtFiles(path.join(tmpCacheDir, "Tectonic", "formats"));
+  const tmpWarm = hasFmtFiles(path2.join(tmpCacheDir, "Tectonic", "formats"));
   return {
     home: os.tmpdir(),
     xdgCache: tmpCacheDir,
@@ -2264,8 +2741,8 @@ async function warmupLatexEngine() {
     const engine = await detectLatexEngine();
     if (engine.name !== "tectonic") return;
     await compileQueue.add(async () => {
-      const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "buatcvkuy-warmup-"));
-      const texFilePath = path.join(tempDir, "warmup.tex");
+      const tempDir = await fsPromises.mkdtemp(path2.join(os.tmpdir(), "buatcvkuy-warmup-"));
+      const texFilePath = path2.join(tempDir, "warmup.tex");
       const warmupTex = [
         "\\documentclass[10pt,a4paper]{article}",
         "\\usepackage[margin=0.6in]{geometry}",
@@ -2346,9 +2823,9 @@ async function compileCVToPdf(cv, mode = "cv") {
     if (cachedInsideQueue) {
       return cachedInsideQueue;
     }
-    const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "buatcvkuy-"));
-    const texFilePath = path.join(tempDir, "resume.tex");
-    const pdfFilePath = path.join(tempDir, "resume.pdf");
+    const tempDir = await fsPromises.mkdtemp(path2.join(os.tmpdir(), "buatcvkuy-"));
+    const texFilePath = path2.join(tempDir, "resume.tex");
+    const pdfFilePath = path2.join(tempDir, "resume.pdf");
     try {
       await fsPromises.writeFile(texFilePath, texSource, "utf8");
       let args;
@@ -2367,7 +2844,7 @@ async function compileCVToPdf(cv, mode = "cv") {
       const combinedLog = `${proc.stdout}
 ${proc.stderr}`;
       const { errors, warnings } = parseLatexLog(combinedLog);
-      if (proc.code !== 0 || !fs.existsSync(pdfFilePath)) {
+      if (proc.code !== 0 || !fs2.existsSync(pdfFilePath)) {
         const readableErr = errors.length > 0 ? errors.join(" | ") : combinedLog.slice(-500) || "Gagal mengompilasi dokumen LaTeX.";
         throw new Error(`Kompilasi LaTeX gagal: ${readableErr}`);
       }
@@ -2545,11 +3022,11 @@ async function createApp() {
 async function startServer() {
   const app = await createApp();
   const PORT = Number(process.env.PORT) || 3e3;
-  const distPath = path2.resolve(process.cwd(), "dist");
-  if (process.env.NODE_ENV === "production" && fs2.existsSync(distPath)) {
+  const distPath = path3.resolve(process.cwd(), "dist");
+  if (process.env.NODE_ENV === "production" && fs3.existsSync(distPath)) {
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
-      res.sendFile(path2.join(distPath, "index.html"));
+      res.sendFile(path3.join(distPath, "index.html"));
     });
   } else {
     const { createServer: createViteServer } = await import("vite");

@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, type PDFFont, type PDFPage, rgb, StandardFonts } from 'pdf-lib';
 import {
   type CVData,
@@ -20,6 +23,65 @@ interface WordToken {
   italic?: boolean;
   underline?: boolean;
   width: number;
+}
+
+interface CmFontBuffers {
+  regular: Uint8Array;
+  bold: Uint8Array;
+  italic: Uint8Array;
+  boldItalic: Uint8Array;
+}
+
+let cachedCmFonts: CmFontBuffers | null = null;
+
+const CM_FONT_FILES = {
+  regular: 'cmunrm.ttf',
+  bold: 'cmunbx.ttf',
+  italic: 'cmunti.ttf',
+  boldItalic: 'cmunbi.ttf',
+} as const;
+
+const CM_CDN_BASE =
+  'https://cdn.jsdelivr.net/gh/dreampulse/computer-modern-web-font@master/font/Serif/';
+
+async function loadSingleCmFont(fileName: string): Promise<Uint8Array> {
+  const candidatePaths = [
+    path.resolve(process.cwd(), 'public', 'fonts', fileName),
+    path.resolve(process.cwd(), '..', 'public', 'fonts', fileName),
+  ];
+
+  for (const candidate of candidatePaths) {
+    try {
+      if (fs.existsSync(candidate)) {
+        return new Uint8Array(fs.readFileSync(candidate));
+      }
+    } catch {
+      // Fallback to next candidate or CDN
+    }
+  }
+
+  const res = await fetch(`${CM_CDN_BASE}${fileName}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Computer Modern font ${fileName}: ${res.status}`);
+  }
+  const arrayBuf = await res.arrayBuffer();
+  return new Uint8Array(arrayBuf);
+}
+
+async function getComputerModernFontBuffers(): Promise<CmFontBuffers | null> {
+  if (cachedCmFonts) return cachedCmFonts;
+  try {
+    const [regular, bold, italic, boldItalic] = await Promise.all([
+      loadSingleCmFont(CM_FONT_FILES.regular),
+      loadSingleCmFont(CM_FONT_FILES.bold),
+      loadSingleCmFont(CM_FONT_FILES.italic),
+      loadSingleCmFont(CM_FONT_FILES.boldItalic),
+    ]);
+    cachedCmFonts = { regular, bold, italic, boldItalic };
+    return cachedCmFonts;
+  } catch {
+    return null;
+  }
 }
 
 const MONTHS_ID_SHORT = [
@@ -67,7 +129,7 @@ const SECTION_LABELS: Record<'id' | 'en', Record<SectionKey, string>> = {
 };
 
 /**
- * Normalizes Unicode strings to WinAnsi-compatible characters for PostScript Type-1 serif fonts.
+ * Normalizes Unicode strings to clean printable characters for serif fonts.
  * Preserves true en-dash (–), em-dash (—), bullet (•), middot (·), and converts newlines/tabs to spaces
  * so words across line breaks are never glued together.
  */
@@ -75,22 +137,16 @@ function sanitizeWinAnsi(input: string): string {
   if (!input) return '';
   return (
     input
-      // Convert all ASCII and Unicode whitespace/newlines/tabs into a standard space first
       .replace(/[\r\n\t\f\v\u00A0\u1680\u2000-\u200B\u2028\u2029\u202F\u205F\u3000\uFEFF]+/g, ' ')
-      // Soft hyphen removal
       .replace(/\u00AD/g, '')
-      // Smart quotes
       .replace(/[\u2018\u2019\u201A\u201B\u02BC]/g, "'")
       .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-      // Normalize triple/double hyphens to true em-dash / en-dash
       .replace(/\s*---\s*/g, ' \u2014 ')
       .replace(/\s*--\s*/g, ' \u2013 ')
       .replace(/\u2212/g, '-')
       .replace(/\s*->\s*/g, ' \u2013 ')
       .replace(/\u2192/g, ' \u2013 ')
       .replace(/\u2026/g, '...')
-      // Keep standard printable ASCII, Latin-1 supplement (including \u00B7 middot),
-      // and WinAnsi punctuation (\u2013 en-dash, \u2014 em-dash, \u2022 bullet)
       .replace(/[^\x20-\x7E\xA0-\xFF\u2013\u2014\u2022]/g, '')
       .replace(/\s{2,}/g, ' ')
       .trim()
@@ -136,7 +192,7 @@ function cleanDisplayUrl(rawUrl: string): string {
  * while ensuring spaces around formatted tokens are preserved.
  */
 export function parseRichTextSpans(raw: string): StyledSpan[] {
-  const cleaned = sanitizeWinAnsi(raw.trim().replace(/^[-•*]\s+/, ''))
+  const cleaned = sanitizeWinAnsi(raw.trim().replace(/^[-•*◦]\s+/, ''))
     .replace(/([^\s([{"'])\*\*([^*]+)\*\*/g, '$1 **$2**')
     .replace(/\*\*([^*]+)\*\*([^\s.,;:!?)\]}"'])/g, '**$1** $2');
   if (!cleaned) return [];
@@ -180,13 +236,11 @@ export function parseRichTextSpans(raw: string): StyledSpan[] {
 function ensureTitleCaseForSmallCaps(input: string): string {
   const safe = sanitizeWinAnsi(input);
   if (!safe) return '';
-  // Split by whitespace and preserve short connectors or capitalize words
   return safe
     .split(' ')
     .map((word) => {
       if (!word) return '';
       if (word === '&' || word === '/' || word === '-') return word;
-      // If word is already mixed case (e.g. McKinsey, PhD), keep it; if all upper or all lower, capitalize first letter
       const isAllUpper = word.length > 1 && word === word.toUpperCase();
       const isAllLower = word === word.toLowerCase();
       if (isAllUpper || isAllLower) {
@@ -245,9 +299,75 @@ function buildSmallCapsSegments(
 }
 
 /**
- * Compiles CVData into a 100% native vector, selectable, searchable Harvard Business School (OCS) PDF
- * on the backend server using pdf-lib Type-1 Serif fonts with authentic \scshape Small-Caps,
- * Knuth-style justified paragraphs, true en-dashes (–), middots (·), and round bullets (•).
+ * Draws a crisp vector Mobile / Telephone icon matching ModernCV's \phone[mobile] glyph.
+ */
+function drawMobilePhoneIcon(page: PDFPage, x: number, yBaseline: number, size: number) {
+  const iconW = size * 0.52;
+  const iconH = size * 0.76;
+  const bottomY = yBaseline - size * 0.04;
+  // Outer phone body
+  page.drawRectangle({
+    x,
+    y: bottomY,
+    width: iconW,
+    height: iconH,
+    borderColor: rgb(0.12, 0.12, 0.12),
+    borderWidth: 0.75,
+  });
+  // Screen area
+  page.drawRectangle({
+    x: x + iconW * 0.16,
+    y: bottomY + iconH * 0.22,
+    width: iconW * 0.68,
+    height: iconH * 0.62,
+    borderColor: rgb(0.12, 0.12, 0.12),
+    borderWidth: 0.45,
+  });
+  // Home button dot
+  page.drawCircle({
+    x: x + iconW / 2,
+    y: bottomY + iconH * 0.11,
+    size: iconW * 0.08,
+    color: rgb(0.12, 0.12, 0.12),
+  });
+}
+
+/**
+ * Draws a crisp vector Envelope icon matching ModernCV's \email glyph.
+ */
+function drawEnvelopeIcon(page: PDFPage, x: number, yBaseline: number, size: number) {
+  const iconW = size * 0.74;
+  const iconH = size * 0.52;
+  const bottomY = yBaseline + size * 0.02;
+  const topY = bottomY + iconH;
+  const midX = x + iconW / 2;
+  const flapY = bottomY + iconH * 0.42;
+
+  page.drawRectangle({
+    x,
+    y: bottomY,
+    width: iconW,
+    height: iconH,
+    borderColor: rgb(0.12, 0.12, 0.12),
+    borderWidth: 0.75,
+  });
+  page.drawLine({
+    start: { x, y: topY },
+    end: { x: midX, y: flapY },
+    thickness: 0.65,
+    color: rgb(0.12, 0.12, 0.12),
+  });
+  page.drawLine({
+    start: { x: x + iconW, y: topY },
+    end: { x: midX, y: flapY },
+    thickness: 0.65,
+    color: rgb(0.12, 0.12, 0.12),
+  });
+}
+
+/**
+ * Compiles CVData into a 100% native vector, selectable, searchable Harvard OCS & Overleaf LaTeX PDF
+ * on the backend server using authentic Computer Modern (`cmun*.ttf`) or Times Type-1 Serif fonts.
  */
 export async function compileHarvardVectorPdf(
   cv: CVData,
@@ -258,20 +378,42 @@ export async function compileHarvardVectorPdf(
   pdfDoc.setAuthor(sanitizeWinAnsi(cv.personalInfo.fullName || 'Candidate'));
   pdfDoc.setCreator('Buat CV Kuy - Harvard LaTeX Engine');
 
-  const fontRegular = await pdfDoc.embedFont(StandardFonts.TimesRoman);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
-  const fontItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
-  const fontBoldItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic);
-
   const { settings } = cv;
+  const useComputerModern =
+    settings.fontFamily === 'lmodern' ||
+    settings.templatePreset === 'jakes' ||
+    settings.templatePreset === 'cover_letter_1' ||
+    settings.templatePreset === 'simple_letter';
+
+  let fontRegular: PDFFont;
+  let fontBold: PDFFont;
+  let fontItalic: PDFFont;
+  let fontBoldItalic: PDFFont;
+
+  const cmBuffers = useComputerModern ? await getComputerModernFontBuffers() : null;
+  if (cmBuffers) {
+    pdfDoc.registerFontkit(fontkit);
+    fontRegular = await pdfDoc.embedFont(cmBuffers.regular);
+    fontBold = await pdfDoc.embedFont(cmBuffers.bold);
+    fontItalic = await pdfDoc.embedFont(cmBuffers.italic);
+    fontBoldItalic = await pdfDoc.embedFont(cmBuffers.boldItalic);
+  } else {
+    fontRegular = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    fontItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+    fontBoldItalic = await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic);
+  }
+
   const isLetter = settings.paperSize === 'letter';
   const pageWidth = isLetter ? 612.0 : 595.28;
   const pageHeight = isLetter ? 792.0 : 841.89;
 
-  // Match latexBuilder.ts geometry margins: 0.72in (normal), 0.52in (narrow/compact/wharton/mckinsey), 0.45in (compact/jakes)
+  // Match geometry margins: 0.72in (normal/cover_letter_1), 0.52in (narrow/compact/wharton/mckinsey), 0.45in (compact/jakes)
   let marginIn = 0.72;
-  if (settings.margin === 'compact' || settings.templatePreset === 'jakes') {
-    marginIn = 0.45;
+  if (settings.templatePreset === 'cover_letter_1') {
+    marginIn = 0.75; // Matches \usepackage[scale=0.75]{geometry} in cover_letter_1.tex
+  } else if (settings.margin === 'compact' || settings.templatePreset === 'jakes') {
+    marginIn = 0.48;
   } else if (
     settings.margin === 'narrow' ||
     settings.templatePreset === 'compact' ||
@@ -298,14 +440,13 @@ export async function compileHarvardVectorPdf(
     settings.templatePreset === 'wharton';
   const isRelaxed = settings.sectionSpacing === 'relaxed';
 
-  // Exact LaTeX spacing tokens matching latexBuilder.ts (accounting for baseline ascent ~0.70*size)
-  const lineMultiplier = isCompact ? 1.11 : isRelaxed ? 1.21 : 1.15;
+  const lineMultiplier = isCompact ? 1.13 : isRelaxed ? 1.22 : 1.16;
   const lineHeight = Number((baseSize * lineMultiplier).toFixed(2));
-  const sectionBeforePt = isCompact ? 3.5 : isRelaxed ? 7.5 : 5.0;
-  const sectionAfterPt = isCompact ? 0.4 : isRelaxed ? 2.2 : 1.0;
-  const itemSepPt = isCompact ? 0.3 : isRelaxed ? 1.5 : 0.7;
-  const topSepPt = isCompact ? 0.2 : isRelaxed ? 1.5 : 0.6;
-  const entryGapPt = isCompact ? 2.0 : isRelaxed ? 4.5 : 3.0;
+  const sectionBeforePt = isCompact ? 4.2 : isRelaxed ? 7.5 : 5.5;
+  const sectionAfterPt = isCompact ? 1.0 : isRelaxed ? 2.5 : 1.5;
+  const itemSepPt = isCompact ? 0.5 : isRelaxed ? 1.5 : 0.8;
+  const topSepPt = isCompact ? 0.4 : isRelaxed ? 1.5 : 0.7;
+  const entryGapPt = isCompact ? 2.4 : isRelaxed ? 4.5 : 3.2;
 
   const contentWidth = pageWidth - marginPt * 2;
   const lang = settings.cvLanguage === 'en' ? 'en' : 'id';
@@ -334,7 +475,7 @@ export async function compileHarvardVectorPdf(
     yBaseline: number,
     capSize: number,
     font: PDFFont,
-    smallCapScale = 0.74
+    smallCapScale = 0.75
   ) => {
     const { segments } = buildSmallCapsSegments(text, capSize, font, smallCapScale);
     let x = xStart;
@@ -354,7 +495,7 @@ export async function compileHarvardVectorPdf(
     text: string,
     capSize: number,
     font: PDFFont,
-    smallCapScale = 0.74
+    smallCapScale = 0.75
   ) => {
     const { segments, totalWidth } = buildSmallCapsSegments(text, capSize, font, smallCapScale);
     if (segments.length === 0) return;
@@ -371,7 +512,7 @@ export async function compileHarvardVectorPdf(
       });
       x += seg.width;
     }
-    cursorY = yBaseline - 2.5;
+    cursorY = yBaseline - 2.8;
   };
 
   const drawCenteredText = (
@@ -396,16 +537,145 @@ export async function compileHarvardVectorPdf(
     cursorY = yBaseline - 2.2;
   };
 
+  const drawRightAlignedRow = (
+    text: string,
+    font: PDFFont,
+    size = baseSize,
+    iconType?: 'phone' | 'email'
+  ) => {
+    const safe = sanitizeWinAnsi(text);
+    if (!safe) return;
+    ensureSpace(lineHeight);
+    const textWidth = font.widthOfTextAtSize(safe, size);
+    const textX = pageWidth - marginPt - textWidth;
+    const yBaseline = cursorY - size;
+
+    if (iconType === 'phone') {
+      drawMobilePhoneIcon(currentPage, textX - size * 0.8, yBaseline, size);
+    } else if (iconType === 'email') {
+      drawEnvelopeIcon(currentPage, textX - size * 1.0, yBaseline, size);
+    }
+
+    currentPage.drawText(safe, {
+      x: textX,
+      y: yBaseline,
+      size,
+      font,
+      color: rgb(0, 0, 0),
+    });
+    cursorY -= Number((size * 1.22).toFixed(2));
+  };
+
   const drawHeaderBlock = () => {
     const p = cv.personalInfo;
+    const isJakes = settings.templatePreset === 'jakes';
     const headerCapSize =
-      settings.templatePreset === 'academic' ? baseSize + 6.0 : baseSize + 8.5;
+      settings.templatePreset === 'academic'
+        ? baseSize + 6.0
+        : isJakes
+          ? baseSize + 10.5 // Matches \Huge\scshape in Jake's Resume
+          : baseSize + 8.5;
 
     // Candidate Name in authentic LaTeX {\Huge\scshape\bfseries} Small-Caps
-    drawCenteredSmallCaps(p.fullName || 'Nama Lengkap', headerCapSize, fontBold, 0.74);
+    drawCenteredSmallCaps(p.fullName || 'Nama Lengkap', headerCapSize, fontBold, 0.75);
 
-    if (p.headline && p.headline.trim()) {
+    // Jake's Resume in Overleaf does not have an italic headline row between the name and contact line
+    if (!isJakes && p.headline && p.headline.trim()) {
       drawCenteredText(p.headline.trim(), baseSize, fontItalic, rgb(0.08, 0.08, 0.08));
+    }
+
+    if (isJakes) {
+      // Jake's Resume: Phone | underlined Email | underlined LinkedIn | underlined GitHub
+      interface ContactSeg {
+        text: string;
+        underline?: boolean;
+      }
+      const jakeContacts: ContactSeg[] = [];
+      if (p.phone?.trim()) {
+        jakeContacts.push({ text: sanitizeWinAnsi(p.phone.trim()) });
+      }
+      if (p.location?.trim() && !p.phone?.trim()) {
+        jakeContacts.push({ text: sanitizeWinAnsi(p.location.trim()) });
+      }
+      if (p.email?.trim()) {
+        jakeContacts.push({ text: sanitizeWinAnsi(p.email.trim()), underline: true });
+      }
+      if (p.linkedin?.trim()) {
+        jakeContacts.push({
+          text: sanitizeWinAnsi(cleanDisplayUrl(p.linkedin)),
+          underline: true,
+        });
+      }
+      if (p.github?.trim()) {
+        jakeContacts.push({
+          text: sanitizeWinAnsi(cleanDisplayUrl(p.github)),
+          underline: true,
+        });
+      }
+      if (p.portfolio?.trim()) {
+        jakeContacts.push({
+          text: sanitizeWinAnsi(cleanDisplayUrl(p.portfolio)),
+          underline: true,
+        });
+      }
+      for (const custom of p.customLinks || []) {
+        if (custom.url?.trim() || custom.label?.trim()) {
+          jakeContacts.push({
+            text: sanitizeWinAnsi(custom.label?.trim() || cleanDisplayUrl(custom.url)),
+            underline: true,
+          });
+        }
+      }
+
+      if (jakeContacts.length > 0) {
+        const contactSize = baseSize - 1.0; // \small
+        const sep = ' | ';
+        const sepW = fontRegular.widthOfTextAtSize(sep, contactSize);
+        const totalW =
+          jakeContacts.reduce(
+            (acc, c) => acc + fontRegular.widthOfTextAtSize(c.text, contactSize),
+            0
+          ) +
+          sepW * (jakeContacts.length - 1);
+
+        ensureSpace(contactSize * 1.2);
+        const yBaseline = cursorY - contactSize * 0.85;
+        let x = Math.max(marginPt, (pageWidth - totalW) / 2);
+
+        for (let i = 0; i < jakeContacts.length; i++) {
+          const item = jakeContacts[i]!;
+          const w = fontRegular.widthOfTextAtSize(item.text, contactSize);
+          currentPage.drawText(item.text, {
+            x,
+            y: yBaseline,
+            size: contactSize,
+            font: fontRegular,
+            color: rgb(0, 0, 0),
+          });
+          if (item.underline) {
+            currentPage.drawRectangle({
+              x,
+              y: yBaseline - 1.1,
+              width: w,
+              height: 0.42,
+              color: rgb(0, 0, 0),
+            });
+          }
+          x += w;
+          if (i < jakeContacts.length - 1) {
+            currentPage.drawText(sep, {
+              x,
+              y: yBaseline,
+              size: contactSize,
+              font: fontRegular,
+              color: rgb(0, 0, 0),
+            });
+            x += sepW;
+          }
+        }
+        cursorY = yBaseline - 2.0;
+      }
+      return;
     }
 
     const contacts: string[] = [];
@@ -433,8 +703,7 @@ export async function compileHarvardVectorPdf(
     }
 
     if (contacts.length > 0) {
-      const sep = settings.templatePreset === 'jakes' ? '   |   ' : '   \u00B7   ';
-      const contactLine = contacts.join(sep);
+      const contactLine = contacts.join('   \u00B7   ');
       drawCenteredText(contactLine, baseSize - 0.9, fontRegular, rgb(0.06, 0.06, 0.06));
     }
 
@@ -473,22 +742,25 @@ export async function compileHarvardVectorPdf(
 
   /**
    * Matches \titleformat{\section}{\scshape\large\bfseries}{}{0em}{}[\vspace{1.5pt}\titlerule]
+   * For Jake's Resume: \titleformat{\section}{\scshape\raggedright\large}{}{0em}{}[\color{black}\titlerule]
    */
   const drawSectionHeading = (title: string) => {
-    const headingCapSize = baseSize + 1.2; // \large
+    const isJakes = settings.templatePreset === 'jakes';
+    const headingCapSize = baseSize + 1.4; // \large
     ensureSpace(sectionBeforePt + headingCapSize + sectionAfterPt + lineHeight * 2);
 
     cursorY -= sectionBeforePt;
     const yBaseline = cursorY - headingCapSize * 0.85;
-    drawSmallCapsAt(title, marginPt, yBaseline, headingCapSize, fontBold, 0.74);
+    // Jake's Resume uses regular (unbolded) Computer Modern Small-Caps for section titles
+    const sectionFont = isJakes ? fontRegular : fontBold;
+    drawSmallCapsAt(title, marginPt, yBaseline, headingCapSize, sectionFont, 0.75);
 
-    // \vspace{1.5pt}\titlerule right under the section heading baseline
-    const ruleY = yBaseline - 2.0;
+    const ruleY = yBaseline - 2.2;
     currentPage.drawRectangle({
       x: marginPt,
       y: ruleY,
       width: contentWidth,
-      height: 0.55,
+      height: 0.52,
       color: rgb(0, 0, 0),
     });
 
@@ -500,15 +772,17 @@ export async function compileHarvardVectorPdf(
     rightText: string,
     leftFont: PDFFont,
     rightFont: PDFFont,
-    size = baseSize
+    size = baseSize,
+    leftIndentPt = 0
   ) => {
     const safeLeft = sanitizeWinAnsi(leftText);
     const safeRight = sanitizeWinAnsi(rightText);
     if (!safeLeft && !safeRight) return;
 
-    ensureSpace(lineHeight);
+    const rowH = Number((size * lineMultiplier).toFixed(2));
+    ensureSpace(rowH);
     const rightWidth = safeRight ? rightFont.widthOfTextAtSize(safeRight, size) : 0;
-    const maxLeftWidth = Math.max(120, contentWidth - rightWidth - 12);
+    const maxLeftWidth = Math.max(120, contentWidth - leftIndentPt - rightWidth - 12);
 
     let displayLeft = safeLeft;
     while (
@@ -521,7 +795,7 @@ export async function compileHarvardVectorPdf(
     const yBaseline = cursorY - size;
     if (displayLeft) {
       currentPage.drawText(displayLeft, {
-        x: marginPt,
+        x: marginPt + leftIndentPt,
         y: yBaseline,
         size,
         font: leftFont,
@@ -539,7 +813,66 @@ export async function compileHarvardVectorPdf(
       });
     }
 
-    cursorY -= lineHeight;
+    cursorY -= rowH;
+  };
+
+  /**
+   * Renders a single-line left-and-right header where the left side contains mixed spans
+   * (e.g., Jake's Resume `\resumeProjectHeading{\textbf{Gitlytics} $|$ \emph{Python, Flask...}}{June 2020 -- Present}`).
+   */
+  const drawMixedLeftTwoColRow = (
+    leftSpans: StyledSpan[],
+    rightText: string,
+    rightFont: PDFFont,
+    size = baseSize,
+    leftIndentPt = 0
+  ) => {
+    const safeRight = sanitizeWinAnsi(rightText);
+    const rowH = Number((size * lineMultiplier).toFixed(2));
+    ensureSpace(rowH);
+
+    const yBaseline = cursorY - size;
+    let x = marginPt + leftIndentPt;
+    for (const span of leftSpans) {
+      const text = sanitizeWinAnsi(span.text);
+      if (!text) continue;
+      // Preserve leading/trailing space around pipe separator
+      const hasLeadSpace = /^\s/.test(span.text);
+      const hasTrailSpace = /\s$/.test(span.text);
+      const rendered = `${hasLeadSpace ? ' ' : ''}${text}${hasTrailSpace ? ' ' : ''}`;
+      const f = pickFont(span.bold, span.italic);
+      const w = f.widthOfTextAtSize(rendered, size);
+      currentPage.drawText(rendered, {
+        x,
+        y: yBaseline,
+        size,
+        font: f,
+        color: rgb(0, 0, 0),
+      });
+      if (span.underline) {
+        currentPage.drawRectangle({
+          x,
+          y: yBaseline - 1.1,
+          width: w,
+          height: 0.42,
+          color: rgb(0, 0, 0),
+        });
+      }
+      x += w;
+    }
+
+    if (safeRight) {
+      const rightWidth = rightFont.widthOfTextAtSize(safeRight, size);
+      currentPage.drawText(safeRight, {
+        x: pageWidth - marginPt - rightWidth,
+        y: yBaseline,
+        size,
+        font: rightFont,
+        color: rgb(0, 0, 0),
+      });
+    }
+
+    cursorY -= rowH;
   };
 
   /**
@@ -550,7 +883,8 @@ export async function compileHarvardVectorPdf(
     spans: StyledSpan[],
     options?: {
       indentPt?: number;
-      bulletChar?: string;
+      bulletStyle?: 'solid' | 'circle';
+      bulletOffsetPt?: number;
       size?: number;
       lineGapMultiplier?: number;
       justify?: boolean;
@@ -558,12 +892,12 @@ export async function compileHarvardVectorPdf(
   ) => {
     const size = options?.size ?? baseSize;
     const indentPt = options?.indentPt ?? 0;
-    const bulletChar = options?.bulletChar;
+    const bulletStyle = options?.bulletStyle;
+    const bulletOffsetPt = options?.bulletOffsetPt ?? 4.0;
     const justify = options?.justify ?? true;
     const rowHeight = Number((size * (options?.lineGapMultiplier ?? lineMultiplier)).toFixed(2));
     const availWidth = contentWidth - indentPt;
 
-    // Tokenize into words and spaces while ensuring adjacent spans don't accidentally merge words
     const words: WordToken[] = [];
     for (const span of spans) {
       const f = pickFont(span.bold, span.italic);
@@ -590,7 +924,6 @@ export async function compileHarvardVectorPdf(
       }
     }
 
-    // Wrap into lines
     const lines: WordToken[][] = [];
     let currentLine: WordToken[] = [];
     let currentWidth = 0;
@@ -600,7 +933,6 @@ export async function compileHarvardVectorPdf(
         continue;
       }
       if (currentWidth + word.width > availWidth && currentLine.length > 0) {
-        // Trim trailing space token from completed line
         while (currentLine.length > 0 && currentLine[currentLine.length - 1]?.text === ' ') {
           const popped = currentLine.pop()!;
           currentWidth -= popped.width;
@@ -624,15 +956,25 @@ export async function compileHarvardVectorPdf(
       ensureSpace(rowHeight);
       const yPos = cursorY - size;
 
-      if (lineIdx === 0 && bulletChar) {
-        // Draw crisp round LaTeX bullet (\textbullet)
-        currentPage.drawText(bulletChar, {
-          x: marginPt + 4.0,
-          y: yPos + 0.3,
-          size: size * 0.88,
-          font: fontBold,
-          color: rgb(0, 0, 0),
-        });
+      if (lineIdx === 0 && bulletStyle) {
+        if (bulletStyle === 'circle') {
+          // Open circle bullet (◦) matching ModernCV Classic itemize in Overleaf
+          currentPage.drawCircle({
+            x: marginPt + bulletOffsetPt + 2.2,
+            y: yPos + size * 0.28,
+            size: 1.75,
+            borderColor: rgb(0, 0, 0),
+            borderWidth: 0.7,
+          });
+        } else {
+          // Crisp solid round LaTeX bullet (\textbullet)
+          currentPage.drawCircle({
+            x: marginPt + bulletOffsetPt + 2.0,
+            y: yPos + size * 0.28,
+            size: 1.55,
+            color: rgb(0, 0, 0),
+          });
+        }
       }
 
       const lineTokens = lines[lineIdx] ?? [];
@@ -641,7 +983,6 @@ export async function compileHarvardVectorPdf(
       const naturalLineWidth = lineTokens.reduce((acc, t) => acc + t.width, 0);
       const slack = availWidth - naturalLineWidth;
 
-      // Distribute slack across spaces for non-final lines (just like TeX justification)
       const extraPerSpace =
         justify && !isLastLine && spaceCount > 0 && slack > 0 && slack < availWidth * 0.28
           ? slack / spaceCount
@@ -680,9 +1021,20 @@ export async function compileHarvardVectorPdf(
   /**
    * Renders a list of bullet points matching \setlist[itemize]{leftmargin=1.35em,itemsep=...,topsep=...}
    */
-  const drawBullets = (bullets: string[]) => {
+  const drawBullets = (
+    bullets: string[],
+    options?: {
+      bulletStyle?: 'solid' | 'circle';
+      size?: number;
+      extraIndentPt?: number;
+    }
+  ) => {
     const nonEmpty = bullets.map((b) => b.trim()).filter(Boolean);
     if (nonEmpty.length === 0) return;
+
+    const bSize = options?.size ?? baseSize;
+    const extraIndent = options?.extraIndentPt ?? 0;
+    const bStyle = options?.bulletStyle ?? 'solid';
 
     cursorY -= topSepPt;
     for (let i = 0; i < nonEmpty.length; i++) {
@@ -690,8 +1042,10 @@ export async function compileHarvardVectorPdf(
       const spans = parseRichTextSpans(b);
       if (spans.length > 0) {
         drawRichParagraph(spans, {
-          indentPt: baseSize * 1.35,
-          bulletChar: '\u2022', // True round bullet •
+          indentPt: extraIndent + bSize * 1.35,
+          bulletStyle: bStyle,
+          bulletOffsetPt: extraIndent + 3.5,
+          size: bSize,
           justify: true,
         });
         if (i < nonEmpty.length - 1) {
@@ -734,37 +1088,157 @@ export async function compileHarvardVectorPdf(
     );
 
     if (preset === 'cover_letter_1') {
-      // ModernCV Classic Header: Left Name + Headline, Right Address + Phone/Email
-      const rightTop = p.location?.trim() || '';
-      const rightBottom = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(' \u00B7 ');
-      drawTwoColRow(p.fullName || 'Nama Lengkap', rightTop, fontBold, fontRegular, baseSize + 3.5);
-      if (p.headline?.trim() || rightBottom) {
-        drawTwoColRow(p.headline?.trim() || '', rightBottom, fontItalic, fontRegular, baseSize - 0.8);
-      }
-      cursorY -= 2;
-      currentPage.drawRectangle({
-        x: marginPt,
-        y: cursorY,
-        width: contentWidth,
-        height: 0.75,
-        color: rgb(0, 0, 0),
-      });
-      cursorY -= 12;
-
-      drawTwoColRow(lang === 'id' ? 'Kepada Yth.' : 'To', dateLine, fontBold, fontRegular);
-    } else if (preset === 'simple_letter') {
-      // Overleaf Standard Letter: Right-aligned sender return address + date
-      drawTwoColRow('', p.fullName || 'Nama Lengkap', fontRegular, fontBold);
+      // Exact Overleaf cover_letter_1.tex (\documentclass[11pt,a4paper,roman]{moderncv} \moderncvstyle{classic} \moderncvcolor{black})
+      // 1. Top-Right Sender Block (Right-aligned: Bold Name, Italic Address, Mobile Icon + Italic Phone, Envelope Icon + Italic Email)
+      drawRightAlignedRow(p.fullName || 'Nama Lengkap', fontBold, baseSize);
       if (p.location?.trim()) {
-        drawTwoColRow('', p.location.trim(), fontRegular, fontRegular, baseSize - 0.5);
+        drawRightAlignedRow(p.location.trim(), fontItalic, baseSize);
       }
-      const contactPair = [p.phone?.trim(), p.email?.trim()].filter(Boolean).join(' \u00B7 ');
-      if (contactPair) {
-        drawTwoColRow('', contactPair, fontRegular, fontRegular, baseSize - 0.5);
+      if (p.phone?.trim()) {
+        drawRightAlignedRow(p.phone.trim(), fontItalic, baseSize, 'phone');
       }
-      cursorY -= 6;
-      drawTwoColRow('', dateLine, fontRegular, fontRegular);
+      if (p.email?.trim()) {
+        drawRightAlignedRow(p.email.trim(), fontItalic, baseSize, 'email');
+      }
+
+      cursorY -= 14;
+
+      // 2. Recipient Block ("Kepada Yth." / "To" in Bold on left, Date in Regular on right)
+      drawTwoColRow(lang === 'id' ? 'Kepada Yth.' : 'To', dateLine, fontBold, fontRegular, baseSize);
+
+      // Italic recipient lines below "Kepada Yth." / "To"
+      const recLines = [
+        cl.recipientName?.trim(),
+        cl.recipientTitle?.trim(),
+        cl.companyName?.trim(),
+        cl.companyAddress?.trim(),
+      ].filter((line): line is string => Boolean(line));
+
+      for (const rLine of recLines) {
+        drawRichParagraph([{ text: sanitizeWinAnsi(rLine), italic: true }], {
+          justify: false,
+          lineGapMultiplier: 1.18,
+        });
+      }
+
+      cursorY -= 16;
+
+      // 3. Bold Subject Line (\opening{\textbf{Sub: ...}})
+      if (cl.subjectLine?.trim()) {
+        const prefix = lang === 'id' ? 'Perihal: ' : 'Sub: ';
+        const rawSub = cl.subjectLine.trim();
+        const hasPrefix =
+          rawSub.toLowerCase().startsWith('perihal') ||
+          rawSub.toLowerCase().startsWith('sub:') ||
+          rawSub.toLowerCase().startsWith('re:');
+        const fullSubject = hasPrefix ? rawSub : `${prefix}${rawSub}`;
+        drawRichParagraph([{ text: sanitizeWinAnsi(fullSubject), bold: true }], {
+          justify: false,
+          lineGapMultiplier: 1.2,
+        });
+        cursorY -= 14;
+      }
+
+      // 4. Salutation ("Dengan hormat," / "Respected Sir,")
+      const salutation =
+        cl.salutation?.trim() || (lang === 'id' ? 'Dengan hormat,' : 'Respected Sir,');
+      drawRichParagraph([{ text: sanitizeWinAnsi(salutation) }], { justify: false });
       cursorY -= 10;
+
+      // 5. Body Paragraphs with Open Circle Bullets (◦) for itemize blocks
+      const paragraphs = [
+        cl.openingParagraph,
+        ...(cl.bodyParagraphs || []),
+        cl.closingParagraph,
+      ]
+        .map((pItem) => pItem?.trim())
+        .filter((pItem): pItem is string => Boolean(pItem));
+
+      for (const para of paragraphs) {
+        const lines = para
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const bulletLines = lines.filter((l) => /^[•\-*◦]\s+/.test(l));
+        if (bulletLines.length > 0) {
+          const introLines = lines.filter((l) => !/^[•\-*◦]\s+/.test(l));
+          if (introLines.length > 0) {
+            drawRichParagraph(parseRichTextSpans(introLines.join(' ')), {
+              lineGapMultiplier: 1.22,
+              justify: false,
+            });
+            cursorY -= 4;
+          }
+          drawBullets(
+            bulletLines.map((b) => b.replace(/^[•\-*◦]\s+/, '')),
+            {
+              bulletStyle: 'circle',
+              extraIndentPt: 4,
+            }
+          );
+          cursorY -= 8;
+        } else {
+          const subParas = para
+            .split(/\n{2,}/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+          for (const sp of subParas) {
+            drawRichParagraph(parseRichTextSpans(sp), {
+              lineGapMultiplier: 1.22,
+              justify: false,
+            });
+            cursorY -= 9;
+          }
+        }
+      }
+
+      // 6. Closing & Enclosures
+      cursorY -= 4;
+      const signOff = cl.signOff?.trim() || (lang === 'id' ? 'Hormat saya,' : 'Yours faithfully,');
+      drawRichParagraph([{ text: sanitizeWinAnsi(signOff) }], { justify: false });
+      cursorY -= 16;
+      drawRichParagraph(
+        [{ text: sanitizeWinAnsi(cv.personalInfo.fullName || 'Candidate'), bold: true }],
+        { justify: false }
+      );
+
+      const enclosures = (cl.enclosures || []).map((e) => e.trim()).filter(Boolean);
+      if (enclosures.length > 0) {
+        cursorY -= 12;
+        const encTitle =
+          lang === 'id'
+            ? 'Lampiran (Berkas / Sertifikat Terlampir):'
+            : 'Enclosed (Marksheets / Certificates):';
+        drawRichParagraph([{ text: encTitle, bold: true }], {
+          size: baseSize - 0.5,
+          justify: false,
+        });
+        cursorY -= 2;
+        for (const item of enclosures) {
+          drawRichParagraph([{ text: sanitizeWinAnsi(item) }], {
+            size: baseSize - 0.8,
+            justify: false,
+          });
+        }
+      }
+      return;
+    }
+
+    if (preset === 'simple_letter') {
+      // Overleaf Standard Letter (\documentclass{letter}): Right-aligned sender return address + date
+      drawRightAlignedRow(p.fullName || 'Nama Lengkap', fontBold, baseSize);
+      if (p.location?.trim()) {
+        drawRightAlignedRow(p.location.trim(), fontRegular, baseSize);
+      }
+      if (p.phone?.trim()) {
+        drawRightAlignedRow(p.phone.trim(), fontRegular, baseSize);
+      }
+      if (p.email?.trim()) {
+        drawRightAlignedRow(p.email.trim(), fontRegular, baseSize);
+      }
+      cursorY -= 8;
+      drawRightAlignedRow(dateLine, fontRegular, baseSize);
+      cursorY -= 12;
     } else {
       // Standard Harvard OCS Cover Letter Header
       drawHeaderBlock();
@@ -831,9 +1305,9 @@ export async function compileHarvardVectorPdf(
         .split('\n')
         .map((l) => l.trim())
         .filter(Boolean);
-      const bulletLines = lines.filter((l) => /^[•\-*]\s+/.test(l));
+      const bulletLines = lines.filter((l) => /^[•\-*◦]\s+/.test(l));
       if (bulletLines.length > 0) {
-        const introLines = lines.filter((l) => !/^[•\-*]\s+/.test(l));
+        const introLines = lines.filter((l) => !/^[•\-*◦]\s+/.test(l));
         if (introLines.length > 0) {
           drawRichParagraph(parseRichTextSpans(introLines.join(' ')), {
             lineGapMultiplier: 1.24,
@@ -841,7 +1315,7 @@ export async function compileHarvardVectorPdf(
           });
           cursorY -= 3;
         }
-        drawBullets(bulletLines.map((b) => b.replace(/^[•\-*]\s+/, '')));
+        drawBullets(bulletLines.map((b) => b.replace(/^[•\-*◦]\s+/, '')));
         cursorY -= 6;
       } else {
         const subParas = para
@@ -897,15 +1371,27 @@ export async function compileHarvardVectorPdf(
     drawHeaderBlock();
 
     const defaultLabels = SECTION_LABELS[lang];
+    const isJakes = settings.templatePreset === 'jakes';
+    const jakesIndentPt = isJakes ? 7.0 : 0; // Matches \resumeSubHeadingListStart leftmargin=0.15in
+    const jakesSubSize = isJakes ? baseSize - 0.8 : baseSize; // Matches \small in Jake's Resume
 
     const renderSectionByKey = (key: SectionKey, customTitle?: string) => {
-      const sectionHeadingText = customTitle?.trim() || defaultLabels[key];
+      const sectionHeadingText =
+        customTitle?.trim() ||
+        (isJakes && key === 'projects' && lang === 'en'
+          ? 'Projects'
+          : isJakes && key === 'skills' && lang === 'en'
+            ? 'Technical Skills'
+            : defaultLabels[key]);
 
       switch (key) {
         case 'summary': {
           if (!cv.summary?.content?.trim()) return;
           drawSectionHeading(sectionHeadingText);
-          drawRichParagraph(parseRichTextSpans(cv.summary.content.trim()), { justify: true });
+          drawRichParagraph(parseRichTextSpans(cv.summary.content.trim()), {
+            indentPt: jakesIndentPt,
+            justify: true,
+          });
           cursorY -= 2;
           break;
         }
@@ -920,13 +1406,33 @@ export async function compileHarvardVectorPdf(
             const degLine = [item.degree.trim(), item.fieldOfStudy.trim()]
               .filter(Boolean)
               .join(', ');
-            drawTwoColRow(item.institution, item.location, fontBold, fontItalic);
-            drawTwoColRow(
-              degLine,
-              drawDateRange(item.startDate, item.endDate, item.isCurrent),
-              fontItalic,
-              fontRegular
-            );
+            const dateStr = drawDateRange(item.startDate, item.endDate, item.isCurrent);
+
+            if (isJakes) {
+              // Jake's Resume Education \resumeSubheading:
+              // Row 1: Bold Institution (left) | Regular Location (right)
+              // Row 2 (\small): Italic Degree (left) | Italic Date (right)
+              drawTwoColRow(
+                item.institution,
+                item.location,
+                fontBold,
+                fontRegular,
+                baseSize,
+                jakesIndentPt
+              );
+              drawTwoColRow(
+                degLine,
+                dateStr,
+                fontItalic,
+                fontItalic,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.institution, item.location, fontBold, fontItalic);
+              drawTwoColRow(degLine, dateStr, fontItalic, fontRegular);
+            }
+
             const extraBullets: string[] = [];
             if (item.gpa?.trim() || item.honors?.trim()) {
               const parts: string[] = [];
@@ -947,7 +1453,10 @@ export async function compileHarvardVectorPdf(
               const thLabel = lang === 'id' ? '*Tesis/Skripsi*:' : '*Thesis*:';
               extraBullets.push(`${thLabel} ${item.thesis.trim()}`);
             }
-            drawBullets([...extraBullets, ...item.bullets]);
+            drawBullets([...extraBullets, ...item.bullets], {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt,
+            });
             if (idx < validEdu.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -962,14 +1471,37 @@ export async function compileHarvardVectorPdf(
           drawSectionHeading(sectionHeadingText);
           for (let idx = 0; idx < validExp.length; idx++) {
             const item = validExp[idx]!;
-            drawTwoColRow(item.company, item.location, fontBold, fontItalic);
-            drawTwoColRow(
-              item.position,
-              drawDateRange(item.startDate, item.endDate, item.isCurrent),
-              fontItalic,
-              fontRegular
-            );
-            drawBullets(item.bullets);
+            const dateStr = drawDateRange(item.startDate, item.endDate, item.isCurrent);
+
+            if (isJakes) {
+              // Jake's Resume Experience \resumeSubheading:
+              // Row 1: Bold Position/Role (left) | Regular Date (right)
+              // Row 2 (\small): Italic Company (left) | Italic Location (right)
+              drawTwoColRow(
+                item.position || item.company,
+                dateStr,
+                fontBold,
+                fontRegular,
+                baseSize,
+                jakesIndentPt
+              );
+              drawTwoColRow(
+                item.position ? item.company : '',
+                item.location,
+                fontItalic,
+                fontItalic,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.company, item.location, fontBold, fontItalic);
+              drawTwoColRow(item.position, dateStr, fontItalic, fontRegular);
+            }
+
+            drawBullets(item.bullets, {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt,
+            });
             if (idx < validExp.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -984,14 +1516,34 @@ export async function compileHarvardVectorPdf(
           drawSectionHeading(sectionHeadingText);
           for (let idx = 0; idx < validLead.length; idx++) {
             const item = validLead[idx]!;
-            drawTwoColRow(item.organization, item.location, fontBold, fontItalic);
-            drawTwoColRow(
-              item.role,
-              drawDateRange(item.startDate, item.endDate, item.isCurrent),
-              fontItalic,
-              fontRegular
-            );
-            drawBullets(item.bullets);
+            const dateStr = drawDateRange(item.startDate, item.endDate, item.isCurrent);
+
+            if (isJakes) {
+              drawTwoColRow(
+                item.role || item.organization,
+                dateStr,
+                fontBold,
+                fontRegular,
+                baseSize,
+                jakesIndentPt
+              );
+              drawTwoColRow(
+                item.role ? item.organization : '',
+                item.location,
+                fontItalic,
+                fontItalic,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.organization, item.location, fontBold, fontItalic);
+              drawTwoColRow(item.role, dateStr, fontItalic, fontRegular);
+            }
+
+            drawBullets(item.bullets, {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt,
+            });
             if (idx < validLead.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -1006,11 +1558,32 @@ export async function compileHarvardVectorPdf(
             const item = validProj[idx]!;
             const linkText = item.link?.trim() ? cleanDisplayUrl(item.link) : '';
             const dateStr = drawDateRange(item.startDate, item.endDate, false);
-            drawTwoColRow(item.name, linkText, fontBold, fontRegular);
-            if (item.techStack?.trim() || dateStr) {
-              drawTwoColRow(item.techStack?.trim() || '', dateStr, fontItalic, fontRegular);
+
+            if (isJakes) {
+              // Jake's Resume \resumeProjectHeading{\textbf{Project Name} $|$ \emph{Tech Stack}}{Date}
+              const leftSpans: StyledSpan[] = [{ text: item.name.trim(), bold: true }];
+              if (item.techStack?.trim()) {
+                leftSpans.push({ text: ' | ' });
+                leftSpans.push({ text: item.techStack.trim(), italic: true });
+              }
+              drawMixedLeftTwoColRow(
+                leftSpans,
+                dateStr || linkText,
+                fontRegular,
+                jakesSubSize,
+                jakesIndentPt
+              );
+            } else {
+              drawTwoColRow(item.name, linkText, fontBold, fontRegular);
+              if (item.techStack?.trim() || dateStr) {
+                drawTwoColRow(item.techStack?.trim() || '', dateStr, fontItalic, fontRegular);
+              }
             }
-            drawBullets(item.bullets);
+
+            drawBullets(item.bullets, {
+              size: jakesSubSize,
+              extraIndentPt: jakesIndentPt,
+            });
             if (idx < validProj.length - 1) {
               cursorY -= entryGapPt;
             }
@@ -1039,10 +1612,12 @@ export async function compileHarvardVectorPdf(
                 leftSpans.map((s) => s.text).join(''),
                 dateStr,
                 fontBold,
-                fontRegular
+                fontRegular,
+                baseSize,
+                jakesIndentPt
               );
             } else {
-              drawRichParagraph(leftSpans, { justify: false });
+              drawRichParagraph(leftSpans, { indentPt: jakesIndentPt, justify: false });
             }
             cursorY -= 1.5;
           }
@@ -1063,7 +1638,7 @@ export async function compileHarvardVectorPdf(
             ]
               .filter(Boolean)
               .join(' ');
-            drawTwoColRow(left, dateStr, fontBold, fontRegular);
+            drawTwoColRow(left, dateStr, fontBold, fontRegular, baseSize, jakesIndentPt);
             cursorY -= 1.5;
           }
           break;
@@ -1087,7 +1662,7 @@ export async function compileHarvardVectorPdf(
             if (dateStr) {
               spans.push({ text: `${dateStr}.` });
             }
-            drawRichParagraph(spans, { justify: true });
+            drawRichParagraph(spans, { indentPt: jakesIndentPt, justify: true });
             cursorY -= 2.5;
           }
           break;
@@ -1101,6 +1676,7 @@ export async function compileHarvardVectorPdf(
           if (!hasAny) return;
 
           drawSectionHeading(sectionHeadingText);
+          const skillSize = isJakes ? jakesSubSize : baseSize;
 
           for (const cat of s.categories) {
             if (!cat.category?.trim() || !cat.items?.trim()) continue;
@@ -1109,9 +1685,9 @@ export async function compileHarvardVectorPdf(
                 { text: `${sanitizeWinAnsi(cat.category.trim())}: `, bold: true },
                 { text: sanitizeWinAnsi(cat.items.trim()) },
               ],
-              { justify: false }
+              { indentPt: jakesIndentPt, size: skillSize, justify: false }
             );
-            cursorY -= 1.5;
+            cursorY -= 1.2;
           }
           const validLangs = s.languages.filter((l) => l.language.trim());
           if (validLangs.length > 0) {
@@ -1128,9 +1704,9 @@ export async function compileHarvardVectorPdf(
                 { text: lbl, bold: true },
                 { text: sanitizeWinAnsi(langItems) },
               ],
-              { justify: false }
+              { indentPt: jakesIndentPt, size: skillSize, justify: false }
             );
-            cursorY -= 1.5;
+            cursorY -= 1.2;
           }
           if (s.interests?.trim()) {
             const lbl = lang === 'id' ? 'Minat: ' : 'Interests: ';
@@ -1139,7 +1715,7 @@ export async function compileHarvardVectorPdf(
                 { text: lbl, bold: true },
                 { text: sanitizeWinAnsi(s.interests.trim()) },
               ],
-              { justify: false }
+              { indentPt: jakesIndentPt, size: skillSize, justify: false }
             );
           }
           break;
@@ -1152,11 +1728,28 @@ export async function compileHarvardVectorPdf(
             drawSectionHeading(sec.sectionTitle.trim());
             for (let idx = 0; idx < validEntries.length; idx++) {
               const entry = validEntries[idx]!;
-              drawTwoColRow(entry.title, entry.location, fontBold, fontItalic);
+              drawTwoColRow(
+                entry.title,
+                entry.location,
+                fontBold,
+                fontItalic,
+                baseSize,
+                jakesIndentPt
+              );
               if (entry.subtitle?.trim() || entry.date?.trim()) {
-                drawTwoColRow(entry.subtitle, entry.date, fontItalic, fontRegular);
+                drawTwoColRow(
+                  entry.subtitle,
+                  entry.date,
+                  fontItalic,
+                  fontRegular,
+                  jakesSubSize,
+                  jakesIndentPt
+                );
               }
-              drawBullets(entry.bullets);
+              drawBullets(entry.bullets, {
+                size: jakesSubSize,
+                extraIndentPt: jakesIndentPt,
+              });
               if (idx < validEntries.length - 1) {
                 cursorY -= entryGapPt;
               }
